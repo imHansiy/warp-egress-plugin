@@ -38,7 +38,7 @@ func managementRoutes() managementRegistration {
 	return managementRegistration{
 		Resources: []resourceRoute{{Path: "/panel", Menu: "WARP 出口管理", Description: "管理 WARP 配置、全局出口与认证文件出口规则。"}},
 		Routes: []managementRoute{
-			{Method: http.MethodGet, Path: "/warp-egress/status", Menu: "WARP 状态"},
+			{Method: http.MethodGet, Path: "/warp-egress/status"},
 			{Method: http.MethodGet, Path: "/warp-egress/profiles"},
 			{Method: http.MethodPost, Path: "/warp-egress/profiles/create"},
 			{Method: http.MethodPost, Path: "/warp-egress/profiles/action"},
