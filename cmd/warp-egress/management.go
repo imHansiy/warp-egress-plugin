@@ -14,7 +14,7 @@ func pluginRegistration() registration {
 			Name:             pluginID,
 			Version:          pluginVersion,
 			Author:           "寒思逸",
-			GitHubRepository: "",
+			GitHubRepository: "https://github.com/imHansiy/warp-egress-plugin",
 			Logo:             "",
 			ConfigFields: []configField{
 				{Name: "data-dir", Type: "string", Description: "插件状态、WARP 注册和日志目录。"},
