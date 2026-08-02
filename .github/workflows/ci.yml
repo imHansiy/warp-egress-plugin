@@ -17,6 +17,9 @@ jobs:
   build:
     name: Build & verify (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    # Debian 11 (GLIBC 2.31) 容器构建，保证 .so 在老系统上可加载
+    container:
+      image: golang:1.23-bullseye
     strategy:
       fail-fast: false
       matrix:
@@ -36,11 +39,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install python3 (registry/smoke checks)
+        run: |
+          apt-get update
+          apt-get install -y python3
+
       - name: Install cross compiler (arm64)
         if: matrix.cc != ''
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Run tests
         run: go test ./...
