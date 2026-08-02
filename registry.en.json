@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "warp-egress",
+      "name": "WARP Egress",
+      "description": "Adds a visual WARP egress pool, hot global switching, scheduled rotation, automatic failover, regex routing, and per-auth-file proxy assignment to CLIProxyAPI.",
+      "author": "寒思逸",
+      "version": "0.2.0",
+      "repository": "https://github.com/OWNER/warp-egress",
+      "homepage": "https://github.com/OWNER/warp-egress",
+      "license": "MIT",
+      "tags": [
+        "network",
+        "proxy",
+        "warp",
+        "egress",
+        "routing"
+      ]
+    }
+  ]
+}
