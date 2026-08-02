@@ -61,7 +61,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p "dist/warp-egress_${GOOS}_${GOARCH}"
-          go build -trimpath -buildmode=c-shared -ldflags="-s -w" \
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
             -o "dist/warp-egress_${GOOS}_${GOARCH}/warp-egress.so" ./cmd/warp-egress
 
       - name: ABI smoke test (linux/amd64 only)
