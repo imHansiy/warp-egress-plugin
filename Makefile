@@ -2,7 +2,15 @@ PLUGIN_NAME := warp-egress
 OUT_DIR := bin
 PKG := ./cmd/warp-egress
 
-.PHONY: test build build-linux-amd64 clean install registry-check release-linux-amd64
+# 版本号默认取自最近的 git tag（去掉前导 v），可通过 VERSION=xxx 覆盖
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+
+# 发布目标平台，可通过 GOOS/GOARCH/CC 覆盖
+GOOS ?= linux
+GOARCH ?= amd64
+CC ?= gcc
+
+.PHONY: test build build-linux-amd64 clean install registry-check smoke release release-linux-amd64
 
 test:
 	go test ./...
@@ -30,9 +38,18 @@ clean:
 smoke: build
 	python3 scripts/abi_smoke_test.py $(OUT_DIR)/$(PLUGIN_NAME).so
 
-release-linux-amd64: build-linux-amd64 registry-check
-	rm -rf dist/release-linux-amd64
-	mkdir -p dist/release-linux-amd64 dist
-	cp $(OUT_DIR)/$(PLUGIN_NAME).so dist/release-linux-amd64/$(PLUGIN_NAME).so
-	cd dist/release-linux-amd64 && zip -q ../$(PLUGIN_NAME)_0.2.0_linux_amd64.zip $(PLUGIN_NAME).so
-	cd dist && sha256sum $(PLUGIN_NAME)_0.2.0_linux_amd64.zip > checksums.txt
+# 参数化发布打包，产物符合 CLIProxyAPI 插件商店格式：
+#   <pluginID>_<version>_<goos>_<goarch>.zip + checksums.txt
+# 用法：
+#   make release VERSION=0.2.0
+#   make release GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc VERSION=0.2.0
+release: test registry-check
+	rm -rf dist/release-$(GOOS)-$(GOARCH)
+	mkdir -p dist/release-$(GOOS)-$(GOARCH) dist
+	CC="$(CC)" CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o dist/release-$(GOOS)-$(GOARCH)/$(PLUGIN_NAME).so $(PKG)
+	cd dist/release-$(GOOS)-$(GOARCH) && zip -q ../$(PLUGIN_NAME)_$(VERSION)_$(GOOS)_$(GOARCH).zip $(PLUGIN_NAME).so
+	cd dist && sha256sum $(PLUGIN_NAME)_$(VERSION)_$(GOOS)_$(GOARCH).zip >> checksums.txt
+
+# 兼容旧目标：Linux AMD64 发布
+release-linux-amd64:
+	$(MAKE) release GOOS=linux GOARCH=amd64 VERSION=$(VERSION)
