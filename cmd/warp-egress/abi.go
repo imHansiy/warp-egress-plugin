@@ -107,8 +107,12 @@ func cliproxyPluginShutdown() { globalManager.Shutdown() }
 func handlePluginMethod(method string, request []byte) ([]byte, error) {
 	switch method {
 	case "plugin.register", "plugin.reconfigure":
+		// CPA reuses the same RPC for register and reconfigure and requires the
+		// SAME registration envelope back. If Configure fails, record the error
+		// but still return a valid registration so the host keeps the plugin in
+		// the active snapshot (otherwise the UI shows "未注册").
 		if err := globalManager.Configure(request); err != nil {
-			return nil, err
+			globalManager.setLastError(err.Error())
 		}
 		return okEnvelope(pluginRegistration())
 	case "management.register":

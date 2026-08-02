@@ -33,7 +33,7 @@ func (m *Manager) Configure(raw []byte) error {
 			return err
 		}
 	}
-	cfg, err := parseConfig(req.ConfigYAML)
+	cfg, err := parseConfig(decodeConfigYAML(req.ConfigYAML))
 	if err != nil {
 		return err
 	}

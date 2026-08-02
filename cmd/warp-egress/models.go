@@ -26,7 +26,7 @@ type envelopeError struct {
 }
 
 type lifecycleRequest struct {
-	ConfigYAML []byte `json:"config_yaml"`
+	ConfigYAML string `json:"config_yaml"`
 }
 
 type configField struct {

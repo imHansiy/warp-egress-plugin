@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,42 @@ import (
 )
 
 var safeIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// decodeConfigYAML tolerates both C-ABI base64-encoded config_yaml and plain
+// YAML text. Some hosts encode raw byte fields as base64 in the JSON envelope,
+// others pass the YAML string directly; returning an error on a format
+// mismatch previously made plugin.register fail and left the plugin "未注册".
+func decodeConfigYAML(raw string) []byte {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(trimmed); err == nil {
+		if looksLikeYAML(decoded) {
+			return decoded
+		}
+	}
+	return []byte(raw)
+}
+
+func looksLikeYAML(raw []byte) bool {
+	text := string(raw)
+	hasColon := strings.Contains(text, ":")
+	hasNewline := strings.Contains(text, "\n")
+	// A valid YAML config contains at least one "key: value" line.
+	if !hasColon {
+		return false
+	}
+	if !hasNewline {
+		// Single-line YAML such as "data-dir: /data/x" still looks like config.
+		if len(strings.SplitN(text, ":", 2)) == 2 {
+			key := strings.TrimSpace(strings.SplitN(text, ":", 2)[0])
+			return key != ""
+		}
+		return false
+	}
+	return true
+}
 
 func newID(prefix string) string {
 	var data [6]byte
