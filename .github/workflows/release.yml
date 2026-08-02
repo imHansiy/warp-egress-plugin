@@ -34,10 +34,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install python3 (registry/smoke checks)
+      - name: Install python3 + zip (registry/smoke/packaging)
         run: |
           apt-get update
-          apt-get install -y python3
+          apt-get install -y python3 zip
 
       - name: Install cross compiler (arm64)
         if: matrix.cc != ''
