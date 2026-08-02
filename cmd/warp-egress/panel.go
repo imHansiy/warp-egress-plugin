@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 const panelHTML = `<!doctype html>
 <html lang="zh-CN">
@@ -243,7 +243,15 @@ var viewMeta={
   automation:['自动切换','配置定时轮换与异常故障转移'],activity:['执行记录','查看当前标签页内的操作结果']
 };
 function el(id){return document.getElementById(id)}
-function key(){return localStorage.getItem('warp-egress-key')||''}
+var WARP_ENC_PREFIX='enc::v1::';var WARP_SECRET_SALT='cli-proxy-api-webui::secure-storage';var _warpKeyCache=null;
+function warpPanelKeyBytes(){try{return new TextEncoder().encode(WARP_SECRET_SALT+'|'+window.location.host+'|'+navigator.userAgent)}catch(_){return new TextEncoder().encode(WARP_SECRET_SALT)}}
+function warpDeobfuscate(payload){var raw=String(payload==null?'':payload);if(!raw||raw.indexOf(WARP_ENC_PREFIX)!==0)return raw;try{var b64=raw.slice(WARP_ENC_PREFIX.length);var binary=atob(b64);var encrypted=new Uint8Array(binary.length);for(var i=0;i<binary.length;i++)encrypted[i]=binary.charCodeAt(i);var kb=warpPanelKeyBytes();var out=new Uint8Array(encrypted.length);for(var j=0;j<encrypted.length;j++)out[j]=encrypted[j]^kb[j%kb.length];return new TextDecoder().decode(out)}catch(_){return raw}}
+function warpTryParse(text){try{return JSON.parse(text)}catch(_){return null}}
+function warpStores(){var list=[];try{list.push(window.localStorage)}catch(_){};try{list.push(window.sessionStorage)}catch(_){};try{if(window.parent&&window.parent!==window){try{list.push(window.parent.localStorage)}catch(_){};try{list.push(window.parent.sessionStorage)}catch(_){}}}catch(_){};return list}
+function warpRead(store,name){try{return store&&store.getItem?store.getItem(name):null}catch(_){return null}}
+function warpExtractFromPanel(){try{var stores=warpStores();for(var s=0;s<stores.length;s++){var store=stores[s];var authRaw=warpRead(store,'cli-proxy-auth');if(authRaw){var parsed=warpTryParse(warpDeobfuscate(authRaw));var k=(parsed&&parsed.state&&parsed.state.managementKey)||(parsed&&parsed.managementKey)||'';if(String(k).trim())return String(k).trim()}var legacy=['managementKey','cli-proxy-management-key','CPA_MANAGEMENT_KEY','management_password'];for(var n=0;n<legacy.length;n++){var raw=warpRead(store,legacy[n]);if(!raw)continue;var plain=warpDeobfuscate(raw);var pp=warpTryParse(plain);if(typeof pp==='string'&&pp.trim())return pp.trim();if(pp&&typeof pp==='object'){var kk=pp.managementKey||pp.password||pp.key||'';if(String(kk).trim())return String(kk).trim()}if(plain&&plain.indexOf(WARP_ENC_PREFIX)!==0&&plain.trim())return plain.trim()}}}catch(_){};return ''}
+function key(){if(_warpKeyCache===null){_warpKeyCache=warpExtractFromPanel()||localStorage.getItem('warp-egress-key')||''}return _warpKeyCache}
+function resetKeyCache(){_warpKeyCache=null}
 function clone(v){return JSON.parse(JSON.stringify(v))}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function attr(v){return esc(v)}
@@ -266,19 +274,19 @@ async function api(path,method,body){
     var headers={'Authorization':'Bearer '+key()};if(body!==undefined)headers['Content-Type']='application/json';
     var response=await fetch('/v0/management/warp-egress'+path,{method:method||'GET',headers:headers,body:body===undefined?undefined:JSON.stringify(body)});
     var text=await response.text();var data;try{data=JSON.parse(text)}catch(e){data={error:text||('HTTP '+response.status)}}
-    if(response.status===401||response.status===403){state.connected=false;updateConnection();showConnect(true)}
+    if(response.status===401||response.status===403){state.connected=false;resetKeyCache();updateConnection();showConnect(true)}
     if(!response.ok)throw new Error(data.error||('HTTP '+response.status));
     state.connected=true;updateConnection();return data;
   }finally{progressEnd()}
 }
 async function connect(){
   var btn=el('connectButton');var value=el('managementKey').value.trim();if(!value){toast('缺少密钥','请输入管理密钥','error');return}
-  localStorage.setItem('warp-egress-key',value);setBusy(btn,true,'连接中');
+  localStorage.setItem('warp-egress-key',value);resetKeyCache();setBusy(btn,true,'连接中');
   try{await refreshAll();modal('connectModal',false);toast('连接成功','插件数据已加载');activity('连接 CLIProxyAPI 管理接口成功','success')}
   catch(e){state.connected=false;updateConnection();toast('连接失败',e.message,'error');activity('连接失败：'+e.message,'error')}
   finally{setBusy(btn,false)}
 }
-function disconnect(){localStorage.removeItem('warp-egress-key');state.connected=false;state.status=null;updateConnection();modal('connectModal',true);toast('密钥已清除','已断开连接')}
+function disconnect(){localStorage.removeItem('warp-egress-key');resetKeyCache();state.connected=false;state.status=null;updateConnection();modal('connectModal',true);toast('密钥已清除','已断开连接')}
 async function refreshAll(){
   if(!key()){showConnect(true);return}
   try{
