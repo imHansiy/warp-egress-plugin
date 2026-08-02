@@ -213,7 +213,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 </div>
 
 <div id="connectModal" class="modal-backdrop">
-  <div class="modal lock"><div class="modal-head"><div><div class="lock-logo">W</div><h3>连接 CLIProxyAPI</h3><p>请输入 remote-management.secret-key</p></div><button class="btn ghost icon" data-action="close-connect">×</button></div><div class="modal-body"><div class="field"><label>管理密钥</label><input id="managementKey" class="input" type="password" autocomplete="current-password" placeholder="输入管理密钥"><div class="field-hint">密钥仅保存在当前标签页的 sessionStorage，不会写入插件配置。</div></div><div class="lock-note">管理接口必须配置 secret-key。资源面板本身可打开，但所有读取和修改操作都需要认证。</div></div><div class="modal-foot"><button class="btn secondary" data-action="disconnect">清除密钥</button><button id="connectButton" class="btn" data-action="connect">连接并加载</button></div></div>
+  <div class="modal lock"><div class="modal-head"><div><div class="lock-logo">W</div><h3>连接 CLIProxyAPI</h3><p>请输入 remote-management.secret-key</p></div><button class="btn ghost icon" data-action="close-connect">×</button></div><div class="modal-body"><div class="field"><label>管理密钥</label><input id="managementKey" class="input" type="password" autocomplete="current-password" placeholder="输入管理密钥"><div class="field-hint">密钥仅保存在当前浏览器 localStorage，不会写入插件配置。</div></div><div class="lock-note">管理接口必须配置 secret-key。资源面板本身可打开，但所有读取和修改操作都需要认证。</div></div><div class="modal-foot"><button class="btn secondary" data-action="disconnect">清除密钥</button><button id="connectButton" class="btn" data-action="connect">连接并加载</button></div></div>
 </div>
 
 <div id="createModal" class="modal-backdrop">
@@ -243,7 +243,7 @@ var viewMeta={
   automation:['自动切换','配置定时轮换与异常故障转移'],activity:['执行记录','查看当前标签页内的操作结果']
 };
 function el(id){return document.getElementById(id)}
-function key(){return sessionStorage.getItem('warp-egress-key')||''}
+function key(){return localStorage.getItem('warp-egress-key')||''}
 function clone(v){return JSON.parse(JSON.stringify(v))}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function attr(v){return esc(v)}
@@ -273,12 +273,12 @@ async function api(path,method,body){
 }
 async function connect(){
   var btn=el('connectButton');var value=el('managementKey').value.trim();if(!value){toast('缺少密钥','请输入管理密钥','error');return}
-  sessionStorage.setItem('warp-egress-key',value);setBusy(btn,true,'连接中');
+  localStorage.setItem('warp-egress-key',value);setBusy(btn,true,'连接中');
   try{await refreshAll();modal('connectModal',false);toast('连接成功','插件数据已加载');activity('连接 CLIProxyAPI 管理接口成功','success')}
   catch(e){state.connected=false;updateConnection();toast('连接失败',e.message,'error');activity('连接失败：'+e.message,'error')}
   finally{setBusy(btn,false)}
 }
-function disconnect(){sessionStorage.removeItem('warp-egress-key');state.connected=false;state.status=null;updateConnection();modal('connectModal',true);toast('密钥已清除','当前标签页已断开连接')}
+function disconnect(){localStorage.removeItem('warp-egress-key');state.connected=false;state.status=null;updateConnection();modal('connectModal',true);toast('密钥已清除','已断开连接')}
 async function refreshAll(){
   if(!key()){showConnect(true);return}
   try{
