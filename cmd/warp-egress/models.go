@@ -9,7 +9,7 @@ import (
 
 const (
 	pluginID      = "warp-egress"
-	pluginVersion = "0.3.0"
+	pluginVersion = "0.3.1"
 	schemaVersion = 1
 	abiVersion    = 1
 )
@@ -145,6 +145,8 @@ type Profile struct {
 	Running     bool        `json:"running"`
 	Healthy     bool        `json:"healthy"`
 	ExitIP      string      `json:"exit_ip,omitempty"`
+	ExitIPV4    string      `json:"exit_ip_v4,omitempty"`
+	ExitIPV6    string      `json:"exit_ip_v6,omitempty"`
 	Colo        string      `json:"colo,omitempty"`
 	WarpMode    string      `json:"warp_mode,omitempty"`
 	LatencyMS   int64       `json:"latency_ms,omitempty"`

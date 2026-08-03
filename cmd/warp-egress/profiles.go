@@ -250,6 +250,31 @@ func (m *Manager) CheckProfile(id string) error {
 	}
 	values := parseTrace(trace)
 	profile.ExitIP = values["ip"]
+	profile.ExitIPV4 = ""
+	profile.ExitIPV6 = ""
+	if parsedIP := net.ParseIP(profile.ExitIP); parsedIP != nil {
+		if parsedIP.To4() != nil {
+			profile.ExitIPV4 = profile.ExitIP
+		} else {
+			profile.ExitIPV6 = profile.ExitIP
+		}
+	}
+	// Complement the other address family through the same WARP exit. These
+	// lookups are best-effort: failures never affect health status.
+	if profile.ExitIPV4 == "" {
+		if body, err := fetchTraceViaSOCKS(profile.ProxyURL, "https://api.ipify.org", 8*time.Second); err == nil {
+			if v := strings.TrimSpace(string(body)); v != "" && net.ParseIP(v) != nil {
+				profile.ExitIPV4 = v
+			}
+		}
+	}
+	if profile.ExitIPV6 == "" {
+		if body, err := fetchTraceViaSOCKS(profile.ProxyURL, "https://api6.ipify.org", 8*time.Second); err == nil {
+			if v := strings.TrimSpace(string(body)); v != "" && net.ParseIP(v) != nil {
+				profile.ExitIPV6 = v
+			}
+		}
+	}
 	profile.Colo = values["colo"]
 	profile.WarpMode = values["warp"]
 	profile.Healthy = profile.ExitIP != "" && (profile.WarpMode == "on" || profile.WarpMode == "plus")
