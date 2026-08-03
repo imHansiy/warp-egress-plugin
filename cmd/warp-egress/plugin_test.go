@@ -224,7 +224,7 @@ func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 }
 
 func TestPluginVersionIsUpdated(t *testing.T) {
-	if pluginVersion != "0.3.1" {
-		t.Fatalf("pluginVersion = %q, want 0.3.1", pluginVersion)
+	if pluginVersion != "0.3.2" {
+		t.Fatalf("pluginVersion = %q, want 0.3.2", pluginVersion)
 	}
 }
