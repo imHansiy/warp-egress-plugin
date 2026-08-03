@@ -41,6 +41,7 @@ func managementRoutes() managementRegistration {
 			{Method: http.MethodGet, Path: "/warp-egress/status"},
 			{Method: http.MethodGet, Path: "/warp-egress/profiles"},
 			{Method: http.MethodPost, Path: "/warp-egress/profiles/create"},
+			{Method: http.MethodPost, Path: "/warp-egress/profiles/import"},
 			{Method: http.MethodPost, Path: "/warp-egress/profiles/action"},
 			{Method: http.MethodPost, Path: "/warp-egress/profiles/delete"},
 			{Method: http.MethodPost, Path: "/warp-egress/global/switch"},
