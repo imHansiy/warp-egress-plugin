@@ -53,6 +53,12 @@ func (m *Manager) RegisterManagedProfile(profile *Profile) error {
 		return errors.New("managed profile is required")
 	}
 	cfg := m.currentConfig()
+	wgPath := filepath.Join(profile.Directory, "wgcf-profile.conf")
+	if _, err := os.Stat(wgPath); err == nil {
+		// A profile was imported (or previously registered): skip wgcf
+		// register/generate and reuse the existing WireGuard config.
+		return m.writeWireproxyConfig(profile, wgPath)
+	}
 	if _, err := exec.LookPath(cfg.WGCFPath); err != nil {
 		return fmt.Errorf("wgcf not found: %w", err)
 	}
@@ -76,9 +82,15 @@ func (m *Manager) RegisterManagedProfile(profile *Profile) error {
 	if err != nil {
 		return fmt.Errorf("wgcf generate failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
-	wgPath := filepath.Join(profile.Directory, "wgcf-profile.conf")
 	if _, err := os.Stat(wgPath); err != nil {
 		return fmt.Errorf("wgcf profile missing: %w", err)
+	}
+	return m.writeWireproxyConfig(profile, wgPath)
+}
+
+func (m *Manager) writeWireproxyConfig(profile *Profile, wgPath string) error {
+	if err := os.MkdirAll(profile.Directory, 0o700); err != nil {
+		return err
 	}
 	wireproxyConfig := fmt.Sprintf("WGConfig = %s\n\n[Socks5]\nBindAddress = %s\n", wgPath, net.JoinHostPort(profile.ListenHost, strconv.Itoa(profile.ListenPort)))
 	configPath := filepath.Join(profile.Directory, "wireproxy.conf")

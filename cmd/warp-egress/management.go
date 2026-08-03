@@ -97,6 +97,16 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
 		}
 		return jsonResponse(http.StatusCreated, profile), nil
+	case "POST /warp-egress/profiles/import":
+		var body importProfileRequest
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		profile, err := m.ImportProfile(body)
+		if err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		return jsonResponse(http.StatusCreated, profile), nil
 	case "POST /warp-egress/profiles/action":
 		var body profileActionRequest
 		if err := decodeJSON(req.Body, &body); err != nil {

@@ -9,7 +9,7 @@ import (
 
 const (
 	pluginID      = "warp-egress"
-	pluginVersion = "0.2.6"
+	pluginVersion = "0.2.7"
 	schemaVersion = 1
 	abiVersion    = 1
 )
@@ -228,6 +228,11 @@ type createProfileRequest struct {
 	Mode      string `json:"mode"`
 	ProxyURL  string `json:"proxy_url,omitempty"`
 	AutoStart bool   `json:"auto_start"`
+}
+
+type importProfileRequest struct {
+	Name         string `json:"name"`
+	WGCFProfile  string `json:"wgcf_profile"`
 }
 
 type profileActionRequest struct {

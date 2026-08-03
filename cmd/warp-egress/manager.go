@@ -273,6 +273,55 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 	return m.stateStore().Profile(profile.ID), nil
 }
 
+func (m *Manager) ImportProfile(req importProfileRequest) (*Profile, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+	content := strings.TrimSpace(req.WGCFProfile)
+	if content == "" {
+		return nil, errors.New("wgcf_profile is required")
+	}
+	cfg := m.currentConfig()
+	port, err := m.AllocatePort()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	profile := &Profile{
+		ID:         newID("warp"),
+		Name:       name,
+		Mode:       ProfileModeManaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		ListenHost: cfg.ListenHost,
+		ListenPort: port,
+		ProxyURL:   "socks5://" + net.JoinHostPort(cfg.ListenHost, fmt.Sprintf("%d", port)),
+		Directory:  filepath.Join(cfg.DataDir, "profiles", newID("warp")),
+	}
+	// Use a stable directory derived from the ID assigned above.
+	profile.Directory = filepath.Join(cfg.DataDir, "profiles", profile.ID)
+	if err := os.MkdirAll(profile.Directory, 0o700); err != nil {
+		return nil, err
+	}
+	wgPath := filepath.Join(profile.Directory, "wgcf-profile.conf")
+	if err := os.WriteFile(wgPath, []byte(content), 0o600); err != nil {
+		return nil, err
+	}
+	if err := m.RegisterManagedProfile(profile); err != nil {
+		return nil, err
+	}
+	if err := m.stateStore().AddProfile(profile); err != nil {
+		return nil, err
+	}
+	if err := m.StartProfile(profile.ID); err != nil {
+		profile.LastError = err.Error()
+		_ = m.stateStore().UpdateProfile(profile)
+	}
+	_ = m.CheckProfile(profile.ID)
+	return m.stateStore().Profile(profile.ID), nil
+}
+
 func (m *Manager) SwitchGlobal(profileID string) error {
 	if profileID != "" && m.stateStore().Profile(profileID) == nil {
 		return errors.New("profile not found")

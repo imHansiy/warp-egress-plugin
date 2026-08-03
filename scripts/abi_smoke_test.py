@@ -114,7 +114,7 @@ def main():
         registration = invoke("plugin.register", {"config_yaml": b64(config.encode()), "schema_version": 1})
         assert registration["metadata"]["Name"] == "warp-egress"
         routes = invoke("management.register", {})
-        assert len(routes["routes"]) == 14 and routes["resources"][0]["Path"] == "/panel"
+        assert len(routes["routes"]) == 15 and routes["resources"][0]["Path"] == "/panel"
 
         status_code, profile = management("/warp-egress/profiles/create", "POST", {"name": "test-exit", "mode": "external", "proxy_url": "socks5://127.0.0.1:59999", "auto_start": False})
         assert status_code == 201, profile
