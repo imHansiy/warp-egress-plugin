@@ -80,7 +80,7 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 		method = http.MethodGet
 	}
 	if path == "/panel" {
-		return htmlResponse(http.StatusOK, []byte(panelHTML)), nil
+		return htmlResponse(http.StatusOK, []byte(renderPanelHTML(m))), nil
 	}
 	switch method + " " + path {
 	case "GET /warp-egress/status":

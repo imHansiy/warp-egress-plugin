@@ -9,7 +9,7 @@ import (
 
 const (
 	pluginID      = "warp-egress"
-	pluginVersion = "0.2.5"
+	pluginVersion = "0.2.6"
 	schemaVersion = 1
 	abiVersion    = 1
 )

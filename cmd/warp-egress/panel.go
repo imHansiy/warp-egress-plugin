@@ -404,5 +404,58 @@ window.addEventListener('beforeunload',function(e){if(JSON.stringify(state.rules
 el('managementKey').value=key();updateConnection();renderActivity();if(key()){refreshAll().catch(function(){showConnect(true)})}else{showConnect(true)}
 })();
 </script>
-</body>
+<script>window.__ONBOARDING__=/*__ONBOARDING_INJECT__*/;</script>
+<script>
+(function(){
+  try{
+    var ob=window.__ONBOARDING__;
+    if(!ob||ob.all_ready)return;
+    try{if(localStorage.getItem('warp-egress-skip-onboarding')==='1')return}catch(_){}
+    var missing=(ob.steps||[]).filter(function(s){return !s.done}).length;
+    var ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(15,32,58,.62);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:24px';
+    var card=document.createElement('div');
+    card.style.cssText='background:#fff;border-radius:18px;max-width:640px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 24px 80px rgba(10,25,50,.45);padding:26px 28px';
+    var title=document.createElement('div');
+    title.style.cssText='font-size:19px;font-weight:800;color:#152238;margin-bottom:6px';
+    title.textContent='初始化引导 · WARP 出口管理';
+    var sub=document.createElement('div');
+    sub.style.cssText='font-size:12px;color:#687890;margin-bottom:18px;line-height:1.7';
+    sub.textContent='检测到还有 '+missing+' 项未完成。按顺序完成以下步骤，即可让 CPA 流量经过 WARP 出口：';
+    card.appendChild(title);card.appendChild(sub);
+    (ob.steps||[]).forEach(function(step,idx){
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;gap:12px;padding:13px 14px;border:1px solid '+(step.done?'#cdeeda':'#e3ebf5')+';border-radius:12px;margin-bottom:10px;background:'+(step.done?'#f4fbf6':'#fff');
+      var icon=document.createElement('div');
+      icon.style.cssText='width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex:none;background:'+(step.done?'#d9f2e3':'#fff0e6')+';color:'+(step.done?'#1d9e57':'#c76a1b')+';margin-top:1px';
+      icon.textContent=step.done?'✓':String(idx+1);
+      var body=document.createElement('div');
+      body.style.cssText='min-width:0';
+      var t=document.createElement('div');
+      t.style.cssText='font-weight:700;color:#152238;font-size:13px';
+      t.textContent=step.title;
+      var h=document.createElement('div');
+      h.style.cssText='color:#687890;font-size:12px;margin-top:4px;line-height:1.65;word-break:break-all';
+      h.textContent=step.hint||'';
+      body.appendChild(t);body.appendChild(h);
+      row.appendChild(icon);row.appendChild(body);
+      card.appendChild(row);
+    });
+    var actions=document.createElement('div');
+    actions.style.cssText='display:flex;gap:10px;margin-top:18px';
+    var recheck=document.createElement('button');
+    recheck.style.cssText='flex:1;height:38px;border-radius:10px;background:#176ee8;color:#fff;font-weight:700;cursor:pointer;border:0';
+    recheck.textContent='重新检测';
+    recheck.onclick=function(){location.reload()};
+    var skip=document.createElement('button');
+    skip.style.cssText='flex:1;height:38px;border-radius:10px;background:#fff;color:#36506f;border:1px solid #c9d7e8;font-weight:700;cursor:pointer';
+    skip.textContent='跳过，直接进入面板';
+    skip.onclick=function(){try{localStorage.setItem('warp-egress-skip-onboarding','1')}catch(_){};ov.remove()};
+    actions.appendChild(recheck);actions.appendChild(skip);
+    card.appendChild(actions);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+  }catch(e){}
+})();
+</script></body>
 </html>`
