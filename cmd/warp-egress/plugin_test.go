@@ -197,21 +197,25 @@ func TestSOCKSRelayEndToEnd(t *testing.T) {
 	}
 }
 
-func TestPanelHTMLContainsImprovedWorkflows(t *testing.T) {
+func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 	required := []string{
-		"data-view=\"overview\"",
-		"data-view=\"profiles\"",
-		"data-view=\"routing\"",
-		"data-view=\"auth\"",
-		"data-view=\"automation\"",
-		"data-action=\"bulk-assign\"",
-		"data-action=\"open-switch\"",
-		"rulesDirty",
-		"connectModal",
+		"id=\"currentName\"",
+		"id=\"profilesBody\"",
+		"data-action=\"open-routing\"",
+		"id=\"routingOverlay\"",
+		"id=\"routingRules\"",
+		"id=\"routingAuth\"",
+		"data-action=\"open-auto\"",
+		"id=\"connectOverlay\"",
 	}
 	for _, marker := range required {
 		if !strings.Contains(panelHTML, marker) {
 			t.Fatalf("panel is missing %q", marker)
+		}
+	}
+	for _, removed := range []string{"data-view=\"overview\"", "class=\"sidebar\"", "执行记录", "metrics"} {
+		if strings.Contains(panelHTML, removed) {
+			t.Fatalf("simplified panel still contains removed structure %q", removed)
 		}
 	}
 	if strings.Contains(strings.ToLower(panelHTML), "#16a34a") || strings.Contains(strings.ToLower(panelHTML), "green") {
@@ -220,7 +224,7 @@ func TestPanelHTMLContainsImprovedWorkflows(t *testing.T) {
 }
 
 func TestPluginVersionIsUpdated(t *testing.T) {
-	if pluginVersion != "0.2.7" {
-		t.Fatalf("pluginVersion = %q, want 0.2.3", pluginVersion)
+	if pluginVersion != "0.3.0" {
+		t.Fatalf("pluginVersion = %q, want 0.3.0", pluginVersion)
 	}
 }
