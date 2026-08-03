@@ -1,0 +1,340 @@
+{
+  "ok": true,
+  "plugin": {
+    "Name": "warp-egress",
+    "Version": "0.2.0",
+    "Author": "寒思逸",
+    "GitHubRepository": "",
+    "Logo": "",
+    "ConfigFields": [
+      {
+        "Name": "data-dir",
+        "Type": "string",
+        "Description": "插件状态、WARP 注册和日志目录。"
+      },
+      {
+        "Name": "wgcf-path",
+        "Type": "string",
+        "Description": "wgcf 可执行文件路径。"
+      },
+      {
+        "Name": "wireproxy-path",
+        "Type": "string",
+        "Description": "wireproxy 可执行文件路径。"
+      },
+      {
+        "Name": "listen-host",
+        "Type": "string",
+        "Description": "本地 SOCKS5 监听地址，默认 127.0.0.1。"
+      },
+      {
+        "Name": "global-port",
+        "Type": "integer",
+        "Description": "CLIProxyAPI 全局 proxy-url 指向的固定 SOCKS5 端口。"
+      },
+      {
+        "Name": "profile-port-start",
+        "Type": "integer",
+        "Description": "WARP 配置实例端口池起始值。"
+      },
+      {
+        "Name": "profile-port-end",
+        "Type": "integer",
+        "Description": "WARP 配置实例端口池结束值。"
+      },
+      {
+        "Name": "auto-start",
+        "Type": "boolean",
+        "Description": "插件启动时自动启动已注册的托管 WARP 实例。"
+      },
+      {
+        "Name": "health-check-interval",
+        "Type": "string",
+        "Description": "自动出口检测间隔，如 60s；设为 0 禁用。"
+      },
+      {
+        "Name": "ip-check-url",
+        "Type": "string",
+        "Description": "出口 IP/WARP 状态检测地址。"
+      },
+      {
+        "Name": "allow-remote-listen",
+        "Type": "boolean",
+        "Description": "允许 SOCKS5 监听非回环地址；默认关闭。"
+      }
+    ]
+  },
+  "abi_version": 1,
+  "global_port": 51041,
+  "mock_upstreams": [
+    "socks5://127.0.0.1:37357",
+    "socks5://127.0.0.1:35269"
+  ],
+  "steps": [
+    {
+      "step": "plugin_registration",
+      "ok": true,
+      "routes": 14,
+      "resource": {
+        "Path": "/panel",
+        "Menu": "WARP 出口管理",
+        "Description": "管理 WARP 配置、全局出口与认证文件出口规则。"
+      }
+    },
+    {
+      "step": "profile_health",
+      "ok": true,
+      "profiles": [
+        {
+          "id": "warp-55fca28f0254",
+          "ip": "203.0.113.10",
+          "colo": "SIN"
+        },
+        {
+          "id": "warp-40f3c17ed531",
+          "ip": "198.51.100.20",
+          "colo": "NRT"
+        }
+      ]
+    },
+    {
+      "step": "global_hot_switch",
+      "ok": true,
+      "first": "profile=warp-a\ndestination=service.test:80",
+      "second": "profile=warp-b\ndestination=service.test:80"
+    },
+    {
+      "step": "rule_application",
+      "ok": true,
+      "result": {
+        "total": 4,
+        "changed": 4,
+        "skipped": 0,
+        "failed": 0,
+        "items": [
+          {
+            "auth_index": "idx-claude",
+            "name": "claude-team.json",
+            "rule_type": "regex",
+            "profile_id": "warp-55fca28f0254",
+            "proxy_url": "socks5://127.0.0.1:37357",
+            "changed": true,
+            "skipped": false
+          },
+          {
+            "auth_index": "idx-codex",
+            "name": "codex-a.json",
+            "rule_type": "type",
+            "profile_id": "warp-40f3c17ed531",
+            "proxy_url": "socks5://127.0.0.1:35269",
+            "changed": true,
+            "skipped": false
+          },
+          {
+            "auth_index": "idx-gemini",
+            "name": "gemini-special.json",
+            "rule_type": "exact",
+            "profile_id": "warp-40f3c17ed531",
+            "proxy_url": "socks5://127.0.0.1:35269",
+            "changed": true,
+            "skipped": false
+          },
+          {
+            "auth_index": "idx-qwen",
+            "name": "qwen-default.json",
+            "rule_type": "global",
+            "profile_id": "warp-55fca28f0254",
+            "changed": true,
+            "skipped": false
+          }
+        ]
+      },
+      "auth_proxy_urls": {
+        "idx-codex": "socks5://127.0.0.1:35269",
+        "idx-claude": "socks5://127.0.0.1:37357",
+        "idx-gemini": "socks5://127.0.0.1:35269",
+        "idx-qwen": "<inherit-global>"
+      }
+    },
+    {
+      "step": "single_auth_assignment",
+      "ok": true,
+      "result": {
+        "auth_index": "idx-claude",
+        "name": "claude-team.json",
+        "rule_type": "exact",
+        "profile_id": "warp-40f3c17ed531",
+        "proxy_url": "socks5://127.0.0.1:35269",
+        "changed": true,
+        "skipped": false
+      }
+    },
+    {
+      "step": "automatic_switch",
+      "ok": true,
+      "selected_profile": "warp-40f3c17ed531",
+      "reason": "manual-auto"
+    },
+    {
+      "step": "management_panel",
+      "ok": true,
+      "html_bytes": 66777,
+      "contains_menu": true
+    }
+  ],
+  "final_status": {
+    "plugin_id": "warp-egress",
+    "version": "0.2.0",
+    "global_relay_url": "socks5://127.0.0.1:51041",
+    "global_relay_running": true,
+    "global_profile_id": "warp-40f3c17ed531",
+    "global_profile": {
+      "id": "warp-40f3c17ed531",
+      "name": "warp-b",
+      "mode": "external",
+      "proxy_url": "socks5://127.0.0.1:35269",
+      "running": true,
+      "healthy": true,
+      "exit_ip": "198.51.100.20",
+      "colo": "NRT",
+      "warp_mode": "on",
+      "last_checked": "2026-08-02T09:53:00.56641903Z",
+      "created_at": "2026-08-02T09:53:00.562933553Z",
+      "updated_at": "2026-08-02T09:53:00.56641923Z"
+    },
+    "profiles": [
+      {
+        "id": "warp-55fca28f0254",
+        "name": "warp-a",
+        "mode": "external",
+        "proxy_url": "socks5://127.0.0.1:37357",
+        "running": true,
+        "healthy": true,
+        "exit_ip": "203.0.113.10",
+        "colo": "SIN",
+        "warp_mode": "on",
+        "latency_ms": 1,
+        "last_checked": "2026-08-02T09:53:00.56078601Z",
+        "created_at": "2026-08-02T09:53:00.542944943Z",
+        "updated_at": "2026-08-02T09:53:00.56078621Z"
+      },
+      {
+        "id": "warp-40f3c17ed531",
+        "name": "warp-b",
+        "mode": "external",
+        "proxy_url": "socks5://127.0.0.1:35269",
+        "running": true,
+        "healthy": true,
+        "exit_ip": "198.51.100.20",
+        "colo": "NRT",
+        "warp_mode": "on",
+        "last_checked": "2026-08-02T09:53:00.56641903Z",
+        "created_at": "2026-08-02T09:53:00.562933553Z",
+        "updated_at": "2026-08-02T09:53:00.56641923Z"
+      }
+    ],
+    "data_dir": "/mnt/data/cpa-plugin-test/runtime/warp-data",
+    "required_host_proxy_url": "socks5://127.0.0.1:51041",
+    "auto_switch": {
+      "enabled": true,
+      "failover_enabled": true,
+      "rotate_interval_seconds": 60,
+      "require_different_ip": true,
+      "last_switch_at": "2026-08-02T09:53:00.58525364Z",
+      "last_profile_id": "warp-40f3c17ed531",
+      "last_reason": "manual-auto"
+    }
+  },
+  "auth_files": {
+    "claude-team.json": {
+      "access_token": "test-only",
+      "email": "ops@team.cn",
+      "proxy_url": "socks5://127.0.0.1:35269",
+      "type": "claude"
+    },
+    "codex-a.json": {
+      "access_token": "test-only",
+      "email": "alpha@example.com",
+      "proxy_url": "socks5://127.0.0.1:35269",
+      "type": "codex"
+    },
+    "gemini-special.json": {
+      "access_token": "test-only",
+      "email": "special@domain.com",
+      "proxy_url": "socks5://127.0.0.1:35269",
+      "type": "gemini-cli"
+    },
+    "qwen-default.json": {
+      "access_token": "test-only",
+      "email": "default@other.net",
+      "type": "qwen"
+    }
+  },
+  "state_file": {
+    "version": 1,
+    "profiles": [
+      {
+        "id": "warp-55fca28f0254",
+        "name": "warp-a",
+        "mode": "external",
+        "proxy_url": "socks5://127.0.0.1:37357",
+        "running": true,
+        "healthy": true,
+        "exit_ip": "203.0.113.10",
+        "colo": "SIN",
+        "warp_mode": "on",
+        "latency_ms": 1,
+        "last_checked": "2026-08-02T09:53:00.56078601Z",
+        "created_at": "2026-08-02T09:53:00.542944943Z",
+        "updated_at": "2026-08-02T09:53:00.56078621Z"
+      },
+      {
+        "id": "warp-40f3c17ed531",
+        "name": "warp-b",
+        "mode": "external",
+        "proxy_url": "socks5://127.0.0.1:35269",
+        "running": true,
+        "healthy": true,
+        "exit_ip": "198.51.100.20",
+        "colo": "NRT",
+        "warp_mode": "on",
+        "last_checked": "2026-08-02T09:53:00.56641903Z",
+        "created_at": "2026-08-02T09:53:00.562933553Z",
+        "updated_at": "2026-08-02T09:53:00.56641923Z"
+      }
+    ],
+    "rules": {
+      "global_profile_id": "warp-40f3c17ed531",
+      "type_rules": [
+        {
+          "key": "codex",
+          "profile_id": "warp-40f3c17ed531",
+          "enabled": true
+        }
+      ],
+      "regex_rules": [
+        {
+          "id": "team-rule",
+          "pattern": "@team\\.cn$",
+          "target": "email",
+          "profile_id": "warp-55fca28f0254",
+          "enabled": true
+        }
+      ],
+      "exact_rules": {
+        "idx-claude": "warp-40f3c17ed531",
+        "idx-gemini": "warp-40f3c17ed531"
+      }
+    },
+    "auto_switch": {
+      "enabled": true,
+      "failover_enabled": true,
+      "rotate_interval_seconds": 60,
+      "require_different_ip": true,
+      "last_switch_at": "2026-08-02T09:53:00.58525364Z",
+      "last_profile_id": "warp-40f3c17ed531",
+      "last_reason": "manual-auto"
+    }
+  },
+  "mock_errors": []
+}

@@ -1,0 +1,9 @@
+warp-egress-data/
+*.log
+.DS_Store
+bin/
+dist/
+# 构建时下载的内嵌工具二进制（go:embed 用，由 scripts/download-tools.sh 生成）
+cmd/warp-egress/embedded_tools/
+# 会话状态
+.omo/

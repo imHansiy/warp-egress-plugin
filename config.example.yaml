@@ -1,0 +1,29 @@
+# CLIProxyAPI 主配置片段
+
+# 所有未配置单独出口的认证文件，以及配置式 API Key，都会走这个固定中继。
+proxy-url: "socks5://127.0.0.1:40000"
+
+remote-management:
+  allow-remote: false
+  secret-key: "请替换为高强度管理密钥"
+
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs:
+    warp-egress:
+      enabled: true
+      priority: 10
+      data-dir: "./warp-egress-data"
+      # wgcf / wireproxy 可省略：插件已内置，找不到时自动解压到 data-dir/bin
+      # 如需使用系统安装的版本，改为对应路径或命令名
+      wgcf-path: "wgcf"
+      wireproxy-path: "wireproxy"
+      listen-host: "127.0.0.1"
+      global-port: 40000
+      profile-port-start: 41000
+      profile-port-end: 41999
+      auto-start: true
+      health-check-interval: "60s"
+      ip-check-url: "https://www.cloudflare.com/cdn-cgi/trace"
+      allow-remote-listen: false
