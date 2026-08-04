@@ -1,9 +1,12 @@
 PLUGIN_NAME := warp-egress
 OUT_DIR := bin
 PKG := ./cmd/warp-egress
+IMPORT_PKG := warp-egress-plugin/cmd/warp-egress
 
 # 版本号默认取自最近的 git tag（去掉前导 v），可通过 VERSION=xxx 覆盖
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+# 构建时注入插件版本号（单一来源），未注入时插件内显示 dev
+VERSION_LDFLAGS := -X $(IMPORT_PKG)/version.Version=$(VERSION)
 
 # 发布目标平台，可通过 GOOS/GOARCH/CC 覆盖
 GOOS ?= linux
@@ -36,27 +39,27 @@ registry-check:
 # 通用构建：GOOS/GOARCH/CC 覆盖生效，输出扩展名随平台
 build: embedded-tools test
 	mkdir -p $(OUT_DIR)
-	CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).$(LIBEXT) $(PKG)
+	CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT_DIR)/$(PLUGIN_NAME).$(LIBEXT) $(PKG)
 
 build-linux-amd64: embedded-tools test
 	mkdir -p $(OUT_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).so $(PKG)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT_DIR)/$(PLUGIN_NAME).so $(PKG)
 
 build-linux-arm64: embedded-tools test
 	mkdir -p $(OUT_DIR)
-	CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).so $(PKG)
+	CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT_DIR)/$(PLUGIN_NAME).so $(PKG)
 
 build-windows-amd64: embedded-tools test
 	mkdir -p $(OUT_DIR)
-	CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).dll $(PKG)
+	CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT_DIR)/$(PLUGIN_NAME).dll $(PKG)
 
 build-darwin-amd64: embedded-tools test
 	mkdir -p $(OUT_DIR)
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).dylib $(PKG)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT_DIR)/$(PLUGIN_NAME).dylib $(PKG)
 
 build-darwin-arm64: embedded-tools test
 	mkdir -p $(OUT_DIR)
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).dylib $(PKG)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o $(OUT_DIR)/$(PLUGIN_NAME).dylib $(PKG)
 
 install: build
 	@test -n "$(PLUGIN_DIR)" || (echo "Usage: make install PLUGIN_DIR=/path/to/CLIProxyAPI/plugins" && exit 1)
@@ -80,7 +83,9 @@ smoke: build
 release: embedded-tools test registry-check
 	rm -rf dist/release-$(GOOS)-$(GOARCH)
 	mkdir -p dist/release-$(GOOS)-$(GOARCH) dist
-	CC="$(CC)" CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o dist/release-$(GOOS)-$(GOARCH)/$(PLUGIN_NAME).$(LIBEXT) $(PKG)
+	@echo "==> 同步 registry 版本号到 $(VERSION)"
+	@sed -i 's/"version": "[^"]*"/"version": "$(VERSION)"/' registry.json registry.zh-CN.json registry.en.json
+	CC="$(CC)" CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -buildmode=c-shared -ldflags="-s -w $(VERSION_LDFLAGS)" -o dist/release-$(GOOS)-$(GOARCH)/$(PLUGIN_NAME).$(LIBEXT) $(PKG)
 	cd dist/release-$(GOOS)-$(GOARCH) && zip -q ../$(PLUGIN_NAME)_$(VERSION)_$(GOOS)_$(GOARCH).zip $(PLUGIN_NAME).$(LIBEXT)
 	cd dist && sha256sum $(PLUGIN_NAME)_$(VERSION)_$(GOOS)_$(GOARCH).zip >> checksums.txt
 

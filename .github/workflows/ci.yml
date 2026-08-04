@@ -61,6 +61,10 @@ jobs:
       - name: Validate registry files
         run: python3 scripts/validate-registry.py
 
+      - name: Resolve version
+        id: version
+        run: echo "version=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
       - name: Download embedded tools for target platform
         run: GOOS_ARCH=${{ matrix.goos }}_${{ matrix.goarch }} ./scripts/download-tools.sh
 
@@ -70,12 +74,13 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p bin
           ext=so
           [ "$GOOS" = windows ] && ext=dll
           [ "$GOOS" = darwin ] && ext=dylib
-          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w -X warp-egress-plugin/cmd/warp-egress/version.Version=${VERSION}" \
             -o "bin/warp-egress_${GOOS}_${GOARCH}.${ext}" ./cmd/warp-egress
 
       - name: ABI smoke test (linux/amd64 only)
@@ -112,14 +117,19 @@ jobs:
       - name: Download embedded tools for target platform
         run: GOOS_ARCH=darwin_${{ matrix.goarch }} ./scripts/download-tools.sh
 
+      - name: Resolve version
+        id: version
+        run: echo "version=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
       - name: Build shared library
         env:
           CGO_ENABLED: "1"
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p bin
-          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w -X warp-egress-plugin/cmd/warp-egress/version.Version=${VERSION}" \
             -o "bin/warp-egress_darwin_${GOARCH}.dylib" ./cmd/warp-egress
 
       - name: Upload artifact

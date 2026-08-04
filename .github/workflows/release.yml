@@ -69,12 +69,13 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           ext=so
           [ "$GOOS" = windows ] && ext=dll
           [ "$GOOS" = darwin ] && ext=dylib
           mkdir -p "dist/warp-egress_${GOOS}_${GOARCH}"
-          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w -X warp-egress-plugin/cmd/warp-egress/version.Version=${VERSION}" \
             -o "dist/warp-egress_${GOOS}_${GOARCH}/warp-egress.${ext}" ./cmd/warp-egress
 
       - name: ABI smoke test (linux/amd64 only)
@@ -126,9 +127,10 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p "dist/warp-egress_darwin_${GOARCH}"
-          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w -X warp-egress-plugin/cmd/warp-egress/version.Version=${VERSION}" \
             -o "dist/warp-egress_darwin_${GOARCH}/warp-egress.dylib" ./cmd/warp-egress
 
       - name: Package plugin zip

@@ -5,14 +5,19 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"warp-egress-plugin/cmd/warp-egress/version"
 )
 
 const (
 	pluginID      = "warp-egress"
-	pluginVersion = "0.3.2"
 	schemaVersion = 1
 	abiVersion    = 1
 )
+
+// pluginVersion 为插件版本号，构建时经 ldflags -X 注入
+// （注入目标是子包 version.Version，见 Makefile / CI）；未注入时显示 dev。
+var pluginVersion = version.Version
 
 type envelope struct {
 	OK     bool            `json:"ok"`

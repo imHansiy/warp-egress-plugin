@@ -223,9 +223,15 @@ func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 	}
 }
 
-func TestPluginVersionIsUpdated(t *testing.T) {
-	if pluginVersion != "0.3.2" {
-		t.Fatalf("pluginVersion = %q, want 0.3.2", pluginVersion)
+func TestPluginVersionFormat(t *testing.T) {
+	// 版本号由构建时 ldflags 注入，不得为常量锁定；这里只校验格式。
+	if pluginVersion == "" {
+		t.Fatal("pluginVersion must not be empty")
+	}
+	for _, c := range pluginVersion {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '.' || c == '-' || c == '+' || c == '_') {
+			t.Fatalf("pluginVersion %q contains invalid character %q", pluginVersion, string(c))
+		}
 	}
 }
 
