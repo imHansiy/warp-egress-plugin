@@ -7,16 +7,19 @@
 - 管理菜单面板：`/v0/resource/plugins/warp-egress/panel`
 - 面板内注册新的托管 WARP 配置
 - 接入已有的外部 SOCKS5 出口
+- 通过已有出口注册新 WARP（`register_via`），绕开本机 IP 的注册限流
 - 全局 WARP 出口无重启切换
 - 定时自动轮换、故障自动转移和不同 IP 约束
-- 按认证文件名、邮箱、标签、服务商或类型执行正则分流
-- 按认证类型/服务商分流，例如 `codex`、`claude`、`gemini-cli`
+- 按认证文件名、邮箱、标签、服务商或类型执行正则分流（含常用正则模板）
+- 按认证类型/服务商分流，类型以下拉选择（仅列 CPA 支持的认证类型）
+- 单文件出口三态：继承全局 / 不设置代理 / 自定义代理（与 CPA 认证文件 `proxy_url` 字段实时联动）
 - 单个认证文件即时切换
 - 每个物理 JSON 认证文件绑定不同出口
 - 出口 IP、Cloudflare Colo、WARP 状态和延迟检测
 - 重复出口 IP 检测
 - WARP 配置启动、停止、重新注册和删除
 - 规则持久化、批量应用与执行结果明细
+- 注册限流（429）友好提示，附等待与替代方案
 
 规则优先级：
 
@@ -51,9 +54,11 @@ CLIProxyAPI 全局 proxy-url
 认证文件 A proxy_url ──> WARP 配置 1 的独立 SOCKS5 端口
 认证文件 B proxy_url ──> WARP 配置 2 的独立 SOCKS5 端口
 认证文件 C 无 proxy_url ──> 继承 CLIProxyAPI 全局中继
+认证文件 D "不设置代理" ──> 清除 proxy_url，跟随全局，不被其他规则接管
+认证文件 E 自定义代理 ──> 使用 CPA 认证文件中已有的代理地址（与 CPA 面板联动）
 ```
 
-全局切换只改变固定中继的后端，不需要重启 CLIProxyAPI。认证文件级规则通过 CLIProxyAPI 的 `host.auth.get` 和 `host.auth.save` 回调，只修改认证 JSON 的 `proxy_url` 字段。
+全局切换只改变固定中继的后端，不需要重启 CLIProxyAPI。认证文件级规则通过 CLIProxyAPI 的 `host.auth.get` 和 `host.auth.save` 回调，只修改认证 JSON 的 `proxy_url` 字段——与 CPA 自带的“认证文件代理”配置是同一个字段，两处完全同步。
 
 ## 依赖
 
@@ -84,9 +89,7 @@ chmod 755 /path/to/CLIProxyAPI/plugins/warp-egress.so
 
 插件已内置 wgcf 和 wireproxy，无需在服务器上单独安装；首次启动自动解压到 data-dir/bin。如需使用系统安装的版本，可在插件配置中指定 `wgcf-path` / `wireproxy-path`。
 
-### 3. 修改 CLIProxyAPI 配置
-
-### 3. 修改 CLIProxyAPI 配置
+### 2. 修改 CLIProxyAPI 配置
 
 把 `config.example.yaml` 中的配置合并到现有 `config.yaml`。核心配置如下：
 
@@ -119,7 +122,7 @@ plugins:
 
 `proxy-url` 必须和插件的 `listen-host + global-port` 一致，否则全局出口切换只会改变插件中继，不会影响 CLIProxyAPI 请求。
 
-### 4. 重启并打开面板
+### 3. 重启并打开面板
 
 ```text
 http://你的CLIProxyAPI地址:8317/v0/resource/plugins/warp-egress/panel
@@ -133,9 +136,19 @@ http://你的CLIProxyAPI地址:8317/v0/resource/plugins/warp-egress/panel
 2. 等待出口检测显示 `warp=on` 或 `warp=plus`。
 3. 把一个配置设为全局出口。
 4. 按需启用定时轮换或故障自动切换。
-5. 添加类型规则和正则规则。
-6. 在认证文件表中，为特殊账号选择独立出口。
+5. 添加类型规则（认证类型从下拉选择）和正则规则（可从常用模板选择）。
+6. 在认证文件表中，为特殊账号选择独立出口（继承全局 / 不设置代理 / 自定义代理 / 具体出口）。
 7. 在“路由规则”页面点击“保存并应用”。
+
+## 注册限流（429）与规避
+
+Cloudflare 对 WARP 注册接口（`api.cloudflareclient.com`）按来源 IP 临时限流（`429 Too Many Requests`，窗口约 15 分钟）。数据中心共享 IP（云开发环境、VPS 机房）最容易触发。插件已内置中文 429 提示，告知等待时间与替代方案。
+
+绕开限流的方式：
+
+1. **通过已有出口注册**：面板“新增配置”中选择“通过已有出口注册”，wgcf 注册请求会经该出口的 SOCKS5 发出（内置 HTTP CONNECT 桥，纯标准库实现）。注意：WARP 出口 IP 也是共享的，Cloudflare 同样可能限流；使用**干净独立 IP 的 SOCKS5**（如家宽/住宅代理）效果最佳。API 方式：`register_via` 传出口 ID 或 `socks5://` 地址。
+2. **导入已有配置**：`POST /v0/management/warp-egress/profiles/import` 直接导入 wgcf-profile.conf，完全不触发注册。配置可从浏览器生成器（warpper.me 等）或干净网络环境运行 `wgcf register && wgcf generate` 获得。
+3. **等待窗口**：429 为临时限流，间隔 15-30 分钟重试通常可成功。
 
 ## 正则目标字段
 
@@ -162,6 +175,7 @@ http://你的CLIProxyAPI地址:8317/v0/resource/plugins/warp-egress/panel
 GET  /v0/management/warp-egress/status
 GET  /v0/management/warp-egress/profiles
 POST /v0/management/warp-egress/profiles/create
+POST /v0/management/warp-egress/profiles/import
 POST /v0/management/warp-egress/profiles/action
 POST /v0/management/warp-egress/profiles/delete
 POST /v0/management/warp-egress/global/switch
@@ -180,6 +194,12 @@ POST /v0/management/warp-egress/auto/run
 ```http
 Authorization: Bearer <remote-management.secret-key>
 ```
+
+关键参数：
+
+- `POST /profiles/create`：托管模式可传 `register_via`（已有托管出口 ID 或 `socks5://` 地址），注册请求将经该出口发出，用于绕开 429 限流。
+- `POST /profiles/import`：`{name, wgcf_profile}`，直接导入 wgcf-profile.conf 内容创建出口，不触发注册。
+- `POST /auth-files/assign`：`{auth_index, profile_id | proxy_url, apply_now}`。`profile_id` 传空字符串清除出口；传 `direct` 表示“不设置代理”（锁定清除，不被其他规则接管）；传 `proxy_url` 字段可写入任意自定义代理（与 CPA 认证文件 `proxy_url` 同一字段）。
 
 ## 从源码构建
 
@@ -251,6 +271,8 @@ warp-egress-data/
 ## 限制
 
 - WARP 配置数量不等于唯一出口 IP 数量。多个配置可能得到同一个共享出口，面板会标记重复 IP。
+- 免费版 WARP 的 IPv4 出口是全局共享的（如 `104.28.222.43`），区分出口以 IPv6 为准。
+- 注册接口按来源 IP 限流（429）：共享出口（数据中心 IP、WARP 出口 IP）均可能触发，使用干净独立 IP 注册最稳定。
 - 重新注册配置后，出口可能变化，也可能仍然相同。
 - 单文件分流仅适用于有物理 `.json` 文件的认证；运行时虚拟认证会被跳过。
 - 配置在主 YAML 中的静态 API Key 无独立认证文件，只能使用全局中继。
