@@ -228,3 +228,20 @@ func TestPluginVersionIsUpdated(t *testing.T) {
 		t.Fatalf("pluginVersion = %q, want 0.3.2", pluginVersion)
 	}
 }
+
+func TestRateLimitDetection(t *testing.T) {
+	sample := "2026/08/04 00:39:48 429 Too Many Requests (1) attached stack trace -- stack trace: | github.com/ViRb3/wgcf/v2/cmd/register.registerAccount"
+	if !isRateLimited(sample) {
+		t.Fatal("isRateLimited should detect 429 Too Many Requests")
+	}
+	if isRateLimited("network is unreachable") {
+		t.Fatal("isRateLimited should not match unrelated errors")
+	}
+	short := trimWGCFOutput(sample)
+	if strings.Contains(short, "attached stack trace") {
+		t.Fatalf("trimWGCFOutput should cut stack trace, got %q", short)
+	}
+	if !strings.Contains(short, "429 Too Many Requests") {
+		t.Fatalf("trimWGCFOutput should keep the 429 message, got %q", short)
+	}
+}

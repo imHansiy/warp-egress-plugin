@@ -226,15 +226,16 @@ type ApplyRulesResult struct {
 }
 
 type createProfileRequest struct {
-	Name      string `json:"name"`
-	Mode      string `json:"mode"`
-	ProxyURL  string `json:"proxy_url,omitempty"`
-	AutoStart bool   `json:"auto_start"`
+	Name        string `json:"name"`
+	Mode        string `json:"mode"`
+	ProxyURL    string `json:"proxy_url,omitempty"`
+	AutoStart   bool   `json:"auto_start"`
+	RegisterVia string `json:"register_via,omitempty"`
 }
 
 type importProfileRequest struct {
-	Name         string `json:"name"`
-	WGCFProfile  string `json:"wgcf_profile"`
+	Name        string `json:"name"`
+	WGCFProfile string `json:"wgcf_profile"`
 }
 
 type profileActionRequest struct {
@@ -253,8 +254,16 @@ type globalSwitchRequest struct {
 type exactAssignRequest struct {
 	AuthIndex string `json:"auth_index"`
 	ProfileID string `json:"profile_id"`
+	ProxyURL  string `json:"proxy_url"`
 	ApplyNow  bool   `json:"apply_now"`
 }
+
+// exactCustomPrefix 标记单文件出口规则引用的是自定义代理地址（CPA 认证文件 proxy_url 字段直接写值），
+// 而不是插件管理的出口。值为 "custom:<代理地址>"。
+const exactCustomPrefix = "custom:"
+
+// exactDirect 标记单文件出口规则为"不设置代理"：清除认证文件的 proxy_url 且不被其他规则接管。
+const exactDirect = "direct"
 
 type statusResponse struct {
 	PluginID             string              `json:"plugin_id"`
