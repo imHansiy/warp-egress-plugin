@@ -22,6 +22,20 @@
 单个认证文件 > 正则表达式 > 认证类型/服务商 > 全局出口
 ```
 
+## 界面预览
+
+主面板：出口拓扑、健康概览、全局切换、全量检测与出口表格。
+
+![主面板](docs/screenshots/panel-overview.png)
+
+路由规则工作台：默认出口、类型/正则规则与认证文件分流（保存与应用分离）。
+
+![分流规则](docs/screenshots/panel-routing.png)
+
+自动切换设置：定时轮换、故障转移与不同公网 IP 约束。
+
+![自动切换](docs/screenshots/panel-auto.png)
+
 ## 工作方式
 
 ```text
