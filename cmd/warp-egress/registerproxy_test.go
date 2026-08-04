@@ -123,3 +123,36 @@ func TestSocks5DialAndConnectProxy(t *testing.T) {
 		t.Fatal("relay payload not received")
 	}
 }
+
+func TestResolveRegisterProxy(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{store: NewStateStore(dir), cfg: Config{DataDir: dir}}
+	cases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "", false},
+		{"socks5://127.0.0.1:1080", "socks5://127.0.0.1:1080", false},
+		{"socks5h://example.com:1080", "socks5h://example.com:1080", false},
+		{"http://user:pass@proxy.example.com:3128", "http://user:pass@proxy.example.com:3128", false},
+		{"https://proxy.example.com:8443", "https://proxy.example.com:8443", false},
+		{"http://no-port", "", true},
+		{"warp-xxxxxxxxxxxx", "", true},
+	}
+	for _, c := range cases {
+		got, err := m.resolveRegisterProxy(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Fatalf("resolveRegisterProxy(%q): want error, got %q", c.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("resolveRegisterProxy(%q): unexpected error %v", c.in, err)
+		}
+		if got != c.want {
+			t.Fatalf("resolveRegisterProxy(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

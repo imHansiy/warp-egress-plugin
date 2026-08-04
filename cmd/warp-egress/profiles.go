@@ -71,19 +71,22 @@ func (m *Manager) RegisterManagedProfile(profile *Profile, registerVia string) e
 	register := exec.Command(cfg.WGCFPath, "register", "--accept-tos")
 	register.Dir = profile.Directory
 	register.Env = append(os.Environ(), "HOME="+profile.Directory)
-	var proxy *registerProxy
 	if registerVia != "" {
-		var err error
-		proxy, err = startRegisterProxy(registerVia)
-		if err != nil {
-			return fmt.Errorf("start register proxy: %w", err)
+		lower := strings.ToLower(registerVia)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			// HTTP(S) 代理：wgcf 的 Go HTTP 客户端原生支持，直接设置环境变量。
+			register.Env = append(register.Env, "HTTPS_PROXY="+registerVia, "HTTP_PROXY="+registerVia)
+		} else {
+			// SOCKS5 代理：经本地 HTTP CONNECT 桥转发（Go 标准库代理环境变量不支持 socks5）。
+			proxy, err := startRegisterProxy(registerVia)
+			if err != nil {
+				return fmt.Errorf("start register proxy: %w", err)
+			}
+			defer proxy.Close()
+			register.Env = append(register.Env, "HTTPS_PROXY="+proxy.URL(), "HTTP_PROXY="+proxy.URL())
 		}
-		register.Env = append(register.Env, "HTTPS_PROXY="+proxy.URL(), "HTTP_PROXY="+proxy.URL())
 	}
 	output, err := register.CombinedOutput()
-	if proxy != nil {
-		proxy.Close()
-	}
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
 		if isRateLimited(msg) {
