@@ -4,6 +4,7 @@ warp-egress-data/
 bin/
 dist/
 # 构建时下载的内嵌工具二进制（go:embed 用，由 scripts/download-tools.sh 生成）
-cmd/warp-egress/embedded_tools/
+cmd/warp-egress/embedded_tools/*
+!cmd/warp-egress/embedded_tools/.gitkeep
 # 会话状态
 .omo/
