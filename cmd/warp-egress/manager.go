@@ -295,7 +295,11 @@ func (m *Manager) resolveRegisterProxy(via string) (string, error) {
 	lower := strings.ToLower(via)
 	switch {
 	case strings.HasPrefix(lower, "socks5://"), strings.HasPrefix(lower, "socks5h://"):
-		return normalizeSOCKSURL(via)
+		parsed, err := url.Parse(via)
+		if err != nil || parsed.Hostname() == "" || parsed.Port() == "" {
+			return "", errors.New("invalid register proxy URL: must include host and port")
+		}
+		return via, nil
 	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
 		parsed, err := url.Parse(via)
 		if err != nil || parsed.Hostname() == "" || parsed.Port() == "" {
