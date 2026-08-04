@@ -147,8 +147,84 @@ Cloudflare 对 WARP 注册接口（`api.cloudflareclient.com`）按来源 IP 临
 绕开限流的方式：
 
 1. **通过已有出口注册**：面板“新增配置”中选择“通过已有出口注册”，wgcf 注册请求会经该出口的 SOCKS5 发出（内置 HTTP CONNECT 桥，纯标准库实现）。注意：WARP 出口 IP 也是共享的，Cloudflare 同样可能限流；使用**干净独立 IP 的 SOCKS5**（如家宽/住宅代理）效果最佳。API 方式：`register_via` 传出口 ID 或 `socks5://` 地址。
-2. **导入已有配置**：`POST /v0/management/warp-egress/profiles/import` 直接导入 wgcf-profile.conf，完全不触发注册。配置可从浏览器生成器（warpper.me 等）或干净网络环境运行 `wgcf register && wgcf generate` 获得。
+2. **导入已有配置**：在**不受限流的网络环境**（家宽、手机流量、住宅代理）生成 `wgcf-profile.conf`，再导入插件，完全不触发注册。完整步骤见下文「如何用 register 生成配置文件并导入」。
 3. **等待窗口**：429 为临时限流，间隔 15-30 分钟重试通常可成功。
+
+## 如何用 register 生成配置文件并导入
+
+适用场景：服务器/云环境注册 WARP 被 429 限流时，在干净网络环境手动注册一次，把生成的配置导入插件使用。
+
+### 第 1 步：在干净网络环境注册
+
+任意一台**不受限流的机器**（自己电脑、手机、家宽网络）上：
+
+1. 下载 wgcf（Windows/macOS/Linux 均有预编译二进制）：
+
+   ```bash
+   # Linux x86-64 示例，其他平台见 https://github.com/ViRb3/wgcf/releases
+   wget https://github.com/ViRb3/wgcf/releases/download/v2.2.31/wgcf_2.2.31_linux_amd64 -O wgcf
+   chmod +x wgcf
+   ```
+
+2. 注册 WARP 账号并生成配置：
+
+   ```bash
+   ./wgcf register --accept-tos   # 生成 wgcf-account.toml（含私钥，勿泄露）
+   ./wgcf generate                # 生成 wgcf-profile.conf
+   ```
+
+   也可以使用浏览器一键生成器（warpper.me、itsyebekhe.github.io/warp 等），下载的 `warp.conf` 就是同一个格式。
+
+3. 查看生成的配置文件内容：
+
+   ```bash
+   cat wgcf-profile.conf
+   ```
+
+   内容形如：
+
+   ```text
+   [Interface]
+   PrivateKey = 6Dk6Z4...=
+   Address = 172.16.0.2/32
+   DNS = 1.1.1.1, 1.0.0.1
+   MTU = 1280
+
+   [Peer]
+   PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
+   AllowedIPs = 0.0.0.0/0, ::/0
+   Endpoint = engage.cloudflareclient.com:2408
+   ```
+
+### 第 2 步：导入插件
+
+**方式 A：管理 API（推荐，可脚本化）**
+
+把 `wgcf-profile.conf` 的内容作为 JSON 字符串传入：
+
+```bash
+CONF=$(cat wgcf-profile.conf)
+curl -X POST http://你的CLIProxyAPI地址:8317/v0/management/warp-egress/profiles/import \
+  -H "Authorization: Bearer <remote-management.secret-key>" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"家用网络注册的出口\",\"wgcf_profile\":\"$CONF\"}"
+```
+
+导入成功后自动分配独立 SOCKS5 端口并启动，面板“WARP 配置”中即可看到、设为全局出口。
+
+**方式 B：手动放置文件**
+
+如果无法调用 API，可先随便创建一个托管出口（会失败但会生成目录），或直接创建目录：
+
+```bash
+mkdir -p /path/to/CLIProxyAPI/warp-egress-data/profiles/<出口ID>
+cp wgcf-profile.conf /path/to/CLIProxyAPI/warp-egress-data/profiles/<出口ID>/
+chmod 600 /path/to/CLIProxyAPI/warp-egress-data/profiles/<出口ID>/wgcf-profile.conf
+```
+
+之后在面板对该出口执行「启动」，插件检测到目录中已有 `wgcf-profile.conf` 会跳过注册直接使用（需先在面板创建同名出口以得到目录与端口）。
+
+> 注意：导入的配置属于独立 WARP 账号，与插件面板注册的账号互不影响；私钥仅存在于该配置文件中，妥善保管。
 
 ## 正则目标字段
 
