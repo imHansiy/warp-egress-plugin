@@ -260,15 +260,84 @@ make build-darwin-amd64 / build-darwin-arm64  # macOS（需在 macOS 主机上�
 
 发布打包见 `make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`），另提供 `release-windows-amd64`、`release-darwin-amd64`、`release-darwin-arm64` 便捷目标。仓库附带的二进制为 Linux x86-64、glibc 动态链接版本。
 
-## Plugin Store registry
+## Plugin Store 安装（推荐）
 
-仓库提供三份 CLIProxyAPI Plugin Store schema v1 文件（`registry.json` 双语、`registry.zh-CN.json`、`registry.en.json`）。发布前将三份文件中的 `https://github.com/OWNER/warp-egress` 替换为真实仓库地址，并执行：
+插件商店是 CLIProxyAPI 管理面板内置的一键安装入口：插件列表 → 点击安装 → 自动下载、校验并启用。
+
+### 前置：发布 Release 资产
+
+商店安装依赖 GitHub Release 上的产物（命名约定为 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，由 Release workflow 在打标签时自动产出）。首次使用前需要发布一次：
+
+```bash
+git tag v0.3.2 && git push origin v0.3.2
+```
+
+推标签后 CI 自动构建并发布全部平台资产（Linux amd64/arm64、Windows amd64、macOS amd64/arm64）。
+
+### 1. 添加商店源
+
+在 CLIProxyAPI 的 `config.yaml` 的 `plugins` 下追加本仓库的 registry 地址：
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"
+  store-sources:
+    - "https://raw.githubusercontent.com/imHansiy/warp-egress-plugin/main/registry.json"
+```
+
+`store-sources` 会追加到内置官方源之后（官方源为 `CLIProxyAPI-Plugins-Store` 仓库的 `registry.json`）。保存并重启 CLIProxyAPI 生效。
+
+### 2. 在管理面板安装
+
+1. 打开 CPA 管理面板：`http://你的CLIProxyAPI地址:8317/management.html`
+2. 进入「插件商店」（Plugin Store）页面
+3. 找到 **WARP Egress / WARP 出口管理**，点击安装
+4. CPA 自动完成：从仓库 GitHub Release 定位 `<id>_<version>_<goos>_<goarch>.zip` → 下载 → 用 `checksums.txt` 校验 SHA256 → 解压到 `plugins/` 目录 → 写入 `config.yaml` 启用该插件
+
+安装完成后即可按「快速安装」后续步骤配置出口。
+
+### 管理 API
+
+```text
+GET  /v0/management/plugin-store                 # 列出所有商店源的插件
+POST /v0/management/plugin-store/:id/install     # 安装指定插件（自动匹配当前平台）
+```
+
+## 手动发布与仓库文件
+
+仓库内提供三份 CLIProxyAPI Plugin Store schema v1 文件：
+
+- `registry.json`：中英双语默认版本
+- `registry.zh-CN.json`：纯中文版本
+- `registry.en.json`：纯英文版本
+
+CLIProxyAPI 当前 registry schema 没有单独的多语言字段，因此官方商店提交时通常只提交一个条目。发布前必须把三份文件中的：
+
+```text
+https://github.com/OWNER/warp-egress
+```
+
+替换为真实公开仓库地址。校验命令：
 
 ```bash
 make registry-check
 ```
 
-详见 `REGISTRY.md`。
+手动构建官方格式的 Linux AMD64 Release 资产：
+
+```bash
+make release-linux-amd64
+```
+
+输出：
+
+```text
+dist/warp-egress_0.2.0_linux_amd64.zip
+dist/checksums.txt
+```
+
+Release 标签应使用 `v0.2.0`，压缩包根目录直接包含 `warp-egress.so`。详见 `REGISTRY.md`。
 
 ## 数据目录
 
