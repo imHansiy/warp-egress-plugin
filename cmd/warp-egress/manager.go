@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -283,15 +284,28 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 	return m.stateStore().Profile(profile.ID), nil
 }
 
-// resolveRegisterProxy 把创建请求里的 register_via 解析为 SOCKS5 代理地址：
-// 空串表示直连；socks5:// 开头表示自定义地址；否则视为已有托管出口的 ID。
+// resolveRegisterProxy 把创建请求里的 register_via 解析为代理地址：
+// 空串表示直连；socks5://、socks5h://、http://、https:// 为自定义代理；
+// 否则视为已有托管出口的 ID（解析为其 SOCKS5 地址）。
 func (m *Manager) resolveRegisterProxy(via string) (string, error) {
 	via = strings.TrimSpace(via)
 	if via == "" {
 		return "", nil
 	}
-	if strings.HasPrefix(via, "socks5://") || strings.HasPrefix(via, "socks5h://") {
-		return normalizeSOCKSURL(via)
+	lower := strings.ToLower(via)
+	switch {
+	case strings.HasPrefix(lower, "socks5://"), strings.HasPrefix(lower, "socks5h://"):
+		parsed, err := url.Parse(via)
+		if err != nil || parsed.Hostname() == "" || parsed.Port() == "" {
+			return "", errors.New("invalid register proxy URL: must include host and port")
+		}
+		return via, nil
+	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
+		parsed, err := url.Parse(via)
+		if err != nil || parsed.Hostname() == "" || parsed.Port() == "" {
+			return "", errors.New("invalid register proxy URL: must include host and port")
+		}
+		return via, nil
 	}
 	p := m.stateStore().Profile(via)
 	if p == nil {

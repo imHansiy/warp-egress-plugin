@@ -22,9 +22,19 @@ type registerProxy struct {
 	once sync.Once
 }
 
-// socks5Dial 通过无认证的 SOCKS5 代理（RFC 1928）连接目标 host:port。
+// socks5Dial 通过 SOCKS5 代理（RFC 1928，支持无认证与用户名/密码认证）
+// 连接目标 host:port。proxyAddr 可为 "host:port" 或 "socks5://user:pass@host:port"。
 func socks5Dial(proxyAddr, target string, timeout time.Duration) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", proxyAddr, timeout)
+	host := proxyAddr
+	var user, pass string
+	if parsed, err := url.Parse(proxyAddr); err == nil && parsed.Hostname() != "" && (parsed.Scheme == "socks5" || parsed.Scheme == "socks5h" || parsed.Scheme == "") {
+		host = parsed.Host
+		if parsed.User != nil {
+			user = parsed.User.Username()
+			pass, _ = parsed.User.Password()
+		}
+	}
+	conn, err := net.DialTimeout("tcp", host, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +42,13 @@ func socks5Dial(proxyAddr, target string, timeout time.Duration) (net.Conn, erro
 		conn.Close()
 		return nil, err
 	}
-	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+	// 方法协商：优先无认证，代理支持用户名/密码时也声明
+	methods := []byte{0x00}
+	if user != "" {
+		methods = append(methods, 0x02)
+	}
+	greeting := append([]byte{0x05, byte(len(methods))}, methods...)
+	if _, err := conn.Write(greeting); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -41,9 +57,42 @@ func socks5Dial(proxyAddr, target string, timeout time.Duration) (net.Conn, erro
 		conn.Close()
 		return nil, err
 	}
-	if resp[0] != 0x05 || resp[1] != 0x00 {
+	if resp[0] != 0x05 {
 		conn.Close()
-		return nil, errors.New("socks5 proxy rejected no-auth method")
+		return nil, errors.New("socks5 proxy returned invalid version")
+	}
+	switch resp[1] {
+	case 0x00:
+		// 无认证
+	case 0x02:
+		if user == "" {
+			conn.Close()
+			return nil, errors.New("socks5 proxy requires authentication but no credentials provided")
+		}
+		if len(user) > 255 || len(pass) > 255 {
+			conn.Close()
+			return nil, errors.New("socks5 credentials too long")
+		}
+		auth := []byte{0x01, byte(len(user))}
+		auth = append(auth, user...)
+		auth = append(auth, byte(len(pass)))
+		auth = append(auth, pass...)
+		if _, err := conn.Write(auth); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		authResp := make([]byte, 2)
+		if _, err := io.ReadFull(conn, authResp); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if authResp[1] != 0x00 {
+			conn.Close()
+			return nil, fmt.Errorf("socks5 authentication failed: code=%d", authResp[1])
+		}
+	default:
+		conn.Close()
+		return nil, fmt.Errorf("socks5 proxy rejected methods: code=%d", resp[1])
 	}
 	host, port, err := net.SplitHostPort(target)
 	if err != nil {
@@ -131,14 +180,13 @@ func parsePort(port string) (int, error) {
 	return n, nil
 }
 
-// startRegisterProxy 启动本地 HTTP CONNECT 代理，把 CONNECT 隧道转发到 socks5Addr（socks5://host:port 或 host:port）。
+// startRegisterProxy 启动本地 HTTP CONNECT 代理，把 CONNECT 隧道转发到 socks5Addr
+// （支持 "host:port"、"socks5://host:port"、"socks5://user:pass@host:port"）。
 func startRegisterProxy(socks5Addr string) (*registerProxy, error) {
-	socks5Host := socks5Addr
 	if parsed, err := url.Parse(socks5Addr); err == nil && (parsed.Scheme == "socks5" || parsed.Scheme == "socks5h") {
 		if parsed.Hostname() == "" || parsed.Port() == "" {
 			return nil, fmt.Errorf("invalid socks5 addr %q: missing host or port", socks5Addr)
 		}
-		socks5Host = parsed.Host
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -151,9 +199,9 @@ func startRegisterProxy(socks5Addr string) (*registerProxy, error) {
 			return
 		}
 		target := ensureHostPort(r.Host)
-		upstream, err := socks5Dial(socks5Host, target, 30*time.Second)
+		upstream, err := socks5Dial(socks5Addr, target, 30*time.Second)
 		if err != nil {
-			fmt.Fprintf(registerProxyLog, "register proxy: socks5 dial %q via %s failed: %v\n", target, socks5Host, err)
+			fmt.Fprintf(registerProxyLog, "register proxy: socks5 dial %q via %s failed: %v\n", target, socks5Addr, err)
 			http.Error(w, "socks5 dial failed: "+err.Error(), http.StatusBadGateway)
 			return
 		}

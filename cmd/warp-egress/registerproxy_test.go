@@ -123,3 +123,84 @@ func TestSocks5DialAndConnectProxy(t *testing.T) {
 		t.Fatal("relay payload not received")
 	}
 }
+
+func TestResolveRegisterProxy(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{store: NewStateStore(dir), cfg: Config{DataDir: dir}}
+	cases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "", false},
+		{"socks5://127.0.0.1:1080", "socks5://127.0.0.1:1080", false},
+		{"socks5h://example.com:1080", "socks5h://example.com:1080", false},
+		{"http://user:pass@proxy.example.com:3128", "http://user:pass@proxy.example.com:3128", false},
+		{"https://proxy.example.com:8443", "https://proxy.example.com:8443", false},
+		{"http://no-port", "", true},
+		{"warp-xxxxxxxxxxxx", "", true},
+	}
+	for _, c := range cases {
+		got, err := m.resolveRegisterProxy(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Fatalf("resolveRegisterProxy(%q): want error, got %q", c.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("resolveRegisterProxy(%q): unexpected error %v", c.in, err)
+		}
+		if got != c.want {
+			t.Fatalf("resolveRegisterProxy(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSocks5AuthHandshake(t *testing.T) {
+	// 模拟需要用户名/密码认证的 SOCKS5 服务器
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	gotUser := make(chan string, 1)
+	gotPass := make(chan string, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4)
+		io.ReadFull(conn, buf)         // 0x05 0x02 0x00 0x02
+		conn.Write([]byte{0x05, 0x02}) // 要求认证
+		h := make([]byte, 1)
+		io.ReadFull(conn, h) // 0x01
+		lb := make([]byte, 1)
+		io.ReadFull(conn, lb)
+		u := make([]byte, lb[0])
+		io.ReadFull(conn, u)
+		gotUser <- string(u)
+		io.ReadFull(conn, lb)
+		p := make([]byte, lb[0])
+		io.ReadFull(conn, p)
+		gotPass <- string(p)
+		conn.Write([]byte{0x01, 0x00})
+		// 读连接请求后返回成功
+		head := make([]byte, 4)
+		io.ReadFull(conn, head)
+		conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+	}()
+	conn, err := socks5Dial("socks5://alice:s3cret@"+ln.Addr().String(), "example.com:443", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	if u := <-gotUser; u != "alice" {
+		t.Fatalf("user = %q, want alice", u)
+	}
+	if p := <-gotPass; p != "s3cret" {
+		t.Fatalf("pass = %q, want s3cret", p)
+	}
+}
