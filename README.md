@@ -76,7 +76,7 @@ CPA 管理面板内置插件商店，一键下载、校验并启用：
      enabled: true
      dir: "plugins"
      store-sources:
-       - "https://raw.githubusercontent.com/imHansiy/warp-egress-plugin/main/registry.json"
+       - "https://raw.githubusercontent.com/imHansiy/warp-egress-plugin/master/registry.json"
    ```
 
    `store-sources` 追加到内置官方源（`CLIProxyAPI-Plugins-Store`）之后。重启生效。
