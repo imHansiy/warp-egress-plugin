@@ -58,7 +58,17 @@ CLIProxyAPI 全局 proxy-url
 ## 依赖
 
 - 支持动态插件机制的 CLIProxyAPI 版本（≥ 6.0.19，推荐最新）
-- Linux x86-64（glibc 动态链接）；其他架构需交叉编译
+- 运行时需 root 权限与 `/dev/net/tun`（wireproxy 建立 WireGuard 隧道；Windows/macOS 桌面版同理）
+
+## 支持平台
+
+| 平台 | 架构 | 插件文件 | 构建方式 |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `warp-egress.so` | 交叉编译（arm64 需 `gcc-aarch64-linux-gnu`） |
+| Windows | amd64 | `warp-egress.dll` | 交叉编译（需 mingw-w64） |
+| macOS | amd64 / arm64 | `warp-egress.dylib` | 原生构建（macOS 主机，系统 clang） |
+
+CI 每次打标签（`v*`）自动构建并发布以上全部平台的 zip 资产。`wgcf` / `wireproxy` 会按构建平台自动下载对应版本内嵌进插件，无需手工准备。
 - 管理 API 需配置 `remote-management.secret-key`
 - 运行时需 root 权限与 `/dev/net/tun`（wireproxy 建立 WireGuard 隧道）
 
@@ -239,7 +249,16 @@ make test
 make build
 ```
 
-输出 `bin/warp-egress.so` 与 `bin/warp-egress.h`。交叉构建 C 共享库需要目标平台的 C 编译器；仓库附带的二进制为 Linux x86-64、glibc 动态链接版本。发布打包见 `make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`）。
+输出 `bin/warp-egress.so`（Windows 为 `.dll`、macOS 为 `.dylib`）与 `bin/warp-egress.h`。构建前会自动按目标平台下载内嵌的 wgcf/wireproxy；交叉构建 C 共享库需要目标平台的 C 编译器：
+
+```bash
+make build-linux-amd64                        # Linux x86-64
+make build-linux-arm64                        # Linux arm64（需 gcc-aarch64-linux-gnu）
+make build-windows-amd64                      # Windows x86-64（需 mingw-w64）
+make build-darwin-amd64 / build-darwin-arm64  # macOS（需在 macOS 主机上构建）
+```
+
+发布打包见 `make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`），另提供 `release-windows-amd64`、`release-darwin-amd64`、`release-darwin-arm64` 便捷目标。仓库附带的二进制为 Linux x86-64、glibc 动态链接版本。
 
 ## Plugin Store registry
 

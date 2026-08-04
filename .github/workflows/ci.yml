@@ -29,6 +29,9 @@ jobs:
           - goos: linux
             goarch: arm64
             cc: aarch64-linux-gnu-gcc
+          - goos: windows
+            goarch: amd64
+            cc: x86_64-w64-mingw32-gcc
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,15 +47,22 @@ jobs:
           apt-get update
           apt-get install -y python3
 
-      - name: Install cross compiler (arm64)
+      - name: Install cross compiler
         if: matrix.cc != ''
-        run: apt-get install -y gcc-aarch64-linux-gnu
+        run: |
+          case "${{ matrix.goos }}" in
+            linux) apt-get install -y gcc-aarch64-linux-gnu ;;
+            windows) apt-get install -y gcc-mingw-w64-x86-64 ;;
+          esac
 
       - name: Run tests
         run: go test ./...
 
       - name: Validate registry files
         run: python3 scripts/validate-registry.py
+
+      - name: Download embedded tools for target platform
+        run: GOOS_ARCH=${{ matrix.goos }}_${{ matrix.goarch }} ./scripts/download-tools.sh
 
       - name: Build shared library
         env:
@@ -62,8 +72,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p bin
+          ext=so
+          [ "$GOOS" = windows ] && ext=dll
+          [ "$GOOS" = darwin ] && ext=dylib
           go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
-            -o "bin/warp-egress_${GOOS}_${GOARCH}.so" ./cmd/warp-egress
+            -o "bin/warp-egress_${GOOS}_${GOARCH}.${ext}" ./cmd/warp-egress
 
       - name: ABI smoke test (linux/amd64 only)
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
@@ -73,5 +86,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: warp-egress-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: bin/warp-egress_${{ matrix.goos }}_${{ matrix.goarch }}.so
+          path: bin/warp-egress_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          if-no-files-found: error
+
+  build-darwin:
+    name: Build & verify (darwin/${{ matrix.goarch }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Download embedded tools for target platform
+        run: GOOS_ARCH=darwin_${{ matrix.goarch }} ./scripts/download-tools.sh
+
+      - name: Build shared library
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p bin
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
+            -o "bin/warp-egress_darwin_${GOARCH}.dylib" ./cmd/warp-egress
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-egress-darwin-${{ matrix.goarch }}
+          path: bin/warp-egress_darwin_${{ matrix.goarch }}.dylib
           if-no-files-found: error

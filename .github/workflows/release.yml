@@ -24,6 +24,9 @@ jobs:
           - goos: linux
             goarch: arm64
             cc: aarch64-linux-gnu-gcc
+          - goos: windows
+            goarch: amd64
+            cc: x86_64-w64-mingw32-gcc
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,9 +42,13 @@ jobs:
           apt-get update
           apt-get install -y python3 zip
 
-      - name: Install cross compiler (arm64)
+      - name: Install cross compiler
         if: matrix.cc != ''
-        run: apt-get install -y gcc-aarch64-linux-gnu
+        run: |
+          case "${{ matrix.goos }}" in
+            linux) apt-get install -y gcc-aarch64-linux-gnu ;;
+            windows) apt-get install -y gcc-mingw-w64-x86-64 ;;
+          esac
 
       - name: Extract version from tag
         id: version
@@ -53,6 +60,9 @@ jobs:
       - name: Validate registry files
         run: python3 scripts/validate-registry.py
 
+      - name: Download embedded tools for target platform
+        run: GOOS_ARCH=${{ matrix.goos }}_${{ matrix.goarch }} ./scripts/download-tools.sh
+
       - name: Build shared library
         env:
           CC: ${{ matrix.cc }}
@@ -60,19 +70,22 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
+          ext=so
+          [ "$GOOS" = windows ] && ext=dll
+          [ "$GOOS" = darwin ] && ext=dylib
           mkdir -p "dist/warp-egress_${GOOS}_${GOARCH}"
           go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
-            -o "dist/warp-egress_${GOOS}_${GOARCH}/warp-egress.so" ./cmd/warp-egress
+            -o "dist/warp-egress_${GOOS}_${GOARCH}/warp-egress.${ext}" ./cmd/warp-egress
 
       - name: ABI smoke test (linux/amd64 only)
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: python3 scripts/abi_smoke_test.py dist/warp-egress_linux_amd64/warp-egress.so
 
-      # 插件商店格式：zip 根目录必须直接包含 .so（不能放子目录）
+      # 插件商店格式：zip 根目录必须直接包含插件文件（不能放子目录）
       - name: Package plugin zip
         run: |
           cd "dist/warp-egress_${{ matrix.goos }}_${{ matrix.goarch }}"
-          zip -q "../warp-egress_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" warp-egress.so
+          zip -q "../warp-egress_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" warp-egress.*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -81,9 +94,58 @@ jobs:
           path: dist/warp-egress_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
           if-no-files-found: error
 
+  build-darwin:
+    name: Build darwin/${{ matrix.goarch }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Download embedded tools for target platform
+        run: GOOS_ARCH=darwin_${{ matrix.goarch }} ./scripts/download-tools.sh
+
+      - name: Build shared library
+        env:
+          CGO_ENABLED: "1"
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p "dist/warp-egress_darwin_${GOARCH}"
+          go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" \
+            -o "dist/warp-egress_darwin_${GOARCH}/warp-egress.dylib" ./cmd/warp-egress
+
+      - name: Package plugin zip
+        run: |
+          cd "dist/warp-egress_darwin_${{ matrix.goarch }}"
+          zip -q "../warp-egress_${{ steps.version.outputs.version }}_darwin_${{ matrix.goarch }}.zip" warp-egress.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-egress-darwin-${{ matrix.goarch }}
+          path: dist/warp-egress_${{ steps.version.outputs.version }}_darwin_${{ matrix.goarch }}.zip
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-darwin]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

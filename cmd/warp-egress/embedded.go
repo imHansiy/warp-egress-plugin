@@ -6,15 +6,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
-// embeddedToolsFS 内嵌 wgcf/wireproxy 官方预编译二进制。
-// 二进制由 scripts/download-tools.sh 在构建前下载到 embedded_tools/（不入库），
+// embeddedToolsFS 内嵌 wgcf/wireproxy 官方预编译二进制（与构建目标平台匹配）。
+// 二进制由 scripts/download-tools.sh 在构建前按 GOOS_ARCH 下载到 embedded_tools/（不入库），
 // 插件首次启动时解压到 <data-dir>/bin/，实现服务器零安装。
+// 目录内可同时存在多平台产物（如 wgcf 与 wgcf.exe），运行时按当前平台选取。
 //
-//go:embed embedded_tools/wgcf
-//go:embed embedded_tools/wireproxy
+//go:embed embedded_tools
 var embeddedToolsFS embed.FS
+
+// toolExt 返回当前平台可执行文件的扩展名（Windows 为 .exe）。
+func toolExt() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
 
 // bundledTool 描述一个内嵌工具的嵌入路径与解压后的文件名。
 type bundledTool struct {
@@ -24,8 +33,8 @@ type bundledTool struct {
 
 // bundledToolList 是插件内置的两个外部工具，顺序即依赖声明顺序。
 var bundledToolList = []bundledTool{
-	{EmbedPath: "embedded_tools/wgcf", FileName: "wgcf"},
-	{EmbedPath: "embedded_tools/wireproxy", FileName: "wireproxy"},
+	{EmbedPath: "embedded_tools/wgcf" + toolExt(), FileName: "wgcf" + toolExt()},
+	{EmbedPath: "embedded_tools/wireproxy" + toolExt(), FileName: "wireproxy" + toolExt()},
 }
 
 // ensureBundledTools 保证 wgcf/wireproxy 可用：
