@@ -1,40 +1,26 @@
 # CLIProxyAPI WARP Egress Plugin
 
-为 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 提供可视化 WARP 出口管理、全局出口热切换和认证文件级代理分流。插件以动态链接库（`.so`）形式加载，`wgcf` 与 `wireproxy` 已内嵌，无需在服务器上安装任何额外软件。
+为 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 提供可视化 WARP 出口管理、全局出口热切换与认证文件级代理分流。插件以动态库形式加载（`.so` / `.dll` / `.dylib`），`wgcf` 与 `wireproxy` 已内嵌，服务器零额外安装。
 
-## 功能特性
+## 特性
 
 | 能力 | 说明 |
 | --- | --- |
-| 管理面板 | 内置 Web UI：`/v0/resource/plugins/warp-egress/panel` |
+| 管理面板 | 内置 Web UI：`/v0/resource/plugins/warp-egress/panel`（亮/暗主题跟随系统） |
 | 托管 WARP 出口 | 面板内注册、启动、停止、重新注册、删除，独立 SOCKS5 端口 |
-| 注册源导入 | 导入已在干净网络生成的 `wgcf-profile.conf`，完全规避注册限流（**推荐**） |
-| 代理注册 | `register_via`：通过已有出口或自定义 SOCKS5 发起注册，绕开本机 IP 限流 |
-| 全局热切换 | 固定中继后端无重启切换，支持定时轮换、故障转移、不同 IP 约束 |
-| 认证文件分流 | 单文件 / 正则 / 类型（服务商）三级规则 + 全局兜底 |
+| 注册源导入 | 导入干净网络生成的 `wgcf-profile.conf`，完全规避注册限流 |
+| 代理注册 | `register_via`：经已有出口或自定义 SOCKS5 发起注册，绕开本机 IP 限流 |
+| 全局热切换 | 固定中继无重启切换；定时轮换、故障转移、不同 IP 约束 |
+| 认证文件分流 | 单文件 / 正则 / 类型三级规则 + 全局兜底 |
 | 单文件三态 | 继承全局 / 不设置代理 / 自定义代理（与 CPA 认证文件 `proxy_url` 字段联动） |
-| 出口检测 | IPv4/IPv6、Cloudflare Colo、WARP 状态、延迟、重复 IP 标记 |
-| 限流提示 | Cloudflare 429 注册限流的中文友好提示及处置建议 |
+| 出口检测 | IPv4/IPv6、Colo、WARP 状态、延迟、重复 IP 标记 |
+| 限流提示 | Cloudflare 429 注册限流的中文提示与处置建议 |
 
 规则优先级：
 
 ```text
 单个认证文件 > 正则表达式 > 认证类型/服务商 > 全局出口
 ```
-
-## 界面预览
-
-主面板：出口拓扑、健康概览、全局切换、全量检测与出口表格。
-
-![主面板](docs/screenshots/panel-overview.png)
-
-路由规则工作台：默认出口、类型/正则规则与认证文件分流（保存与应用分离）。
-
-![分流规则](docs/screenshots/panel-routing.png)
-
-自动切换设置：定时轮换、故障转移与不同公网 IP 约束。
-
-![自动切换](docs/screenshots/panel-auto.png)
 
 ## 工作方式
 
@@ -53,30 +39,51 @@ CLIProxyAPI 全局 proxy-url
 认证文件 E 自定义代理 ──> 使用 CPA 认证文件中已有的代理地址（与 CPA 面板联动）
 ```
 
-全局切换只改变固定中继的后端，不需要重启 CLIProxyAPI。认证文件级规则通过 CLIProxyAPI 的 `host.auth.get` / `host.auth.save` 回调，只修改认证 JSON 的 `proxy_url` 字段——与 CPA 自带的“认证文件代理”是同一个字段，两处完全同步。
+全局切换只改变固定中继的后端，无需重启 CLIProxyAPI。认证文件级规则通过 `host.auth.get` / `host.auth.save` 回调修改认证 JSON 的 `proxy_url` 字段——与 CPA 自带「认证文件代理」是同一个字段，两处完全同步。
 
-## 依赖
+## 界面预览
 
-- 支持动态插件机制的 CLIProxyAPI 版本（≥ 6.0.19，推荐最新）
-- 运行时需 root 权限与 `/dev/net/tun`（wireproxy 建立 WireGuard 隧道；Windows/macOS 桌面版同理）
+![主面板：出口拓扑、健康概览、全局切换与出口表格](docs/screenshots/panel-overview.png)
 
-## 支持平台
+![分流规则：默认出口、类型/正则规则与认证文件分流](docs/screenshots/panel-routing.png)
 
-| 平台 | 架构 | 插件文件 | 构建方式 |
-| --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `warp-egress.so` | 交叉编译（arm64 需 `gcc-aarch64-linux-gnu`） |
-| Windows | amd64 | `warp-egress.dll` | 交叉编译（需 mingw-w64） |
-| macOS | amd64 / arm64 | `warp-egress.dylib` | 原生构建（macOS 主机，系统 clang） |
+![自动切换：定时轮换、故障转移与不同公网 IP 约束](docs/screenshots/panel-auto.png)
 
-CI 每次打标签（`v*`）自动构建并发布以上全部平台的 zip 资产。`wgcf` / `wireproxy` 会按构建平台自动下载对应版本内嵌进插件，无需手工准备。
-- 管理 API 需配置 `remote-management.secret-key`
-- 运行时需 root 权限与 `/dev/net/tun`（wireproxy 建立 WireGuard 隧道）
+## 安装
 
-`wgcf` 与 `wireproxy` 为第三方开源项目（非 Cloudflare 官方客户端），构建时从各自 GitHub Release 下载并内嵌进插件，运行时自动解压到 data-dir/bin。
+支持三种安装路径，按推荐程度排序：
 
-## 快速安装
+| 方式 | 场景 |
+| --- | --- |
+| ① 插件商店一键安装 | 有 GitHub Release 资产（推荐，见下文） |
+| ② 注册源导入 | 服务器 IP 触发注册限流（429）时的首选创建出口方式 |
+| ③ 手动复制 | 离线/内网环境 |
 
-### 第 0 步：安装插件本体
+### 方式 ①：插件商店安装
+
+CPA 管理面板内置插件商店，一键下载、校验并启用：
+
+1. **发布 Release 资产**（首次需要；商店安装依赖 GitHub Release 上的 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，打标签后 CI 自动构建全部平台）：
+
+   ```bash
+   git tag v0.3.2 && git push origin v0.3.2
+   ```
+
+2. **添加商店源**：在 `config.yaml` 的 `plugins` 下追加：
+
+   ```yaml
+   plugins:
+     enabled: true
+     dir: "plugins"
+     store-sources:
+       - "https://raw.githubusercontent.com/imHansiy/warp-egress-plugin/main/registry.json"
+   ```
+
+   `store-sources` 追加到内置官方源（`CLIProxyAPI-Plugins-Store`）之后。重启生效。
+
+3. **面板安装**：打开 `http://你的CLIProxyAPI地址:8317/management.html` →「插件商店」→ 找到 **WARP Egress** → 安装。CPA 自动完成：定位 zip → 下载 → `checksums.txt` 校验 SHA256 → 解压到 `plugins/` → 写入 `config.yaml` 启用。
+
+### 方式 ②：手动复制
 
 ```bash
 mkdir -p /path/to/CLIProxyAPI/plugins
@@ -84,15 +91,11 @@ cp bin/warp-egress.so /path/to/CLIProxyAPI/plugins/warp-egress.so
 chmod 755 /path/to/CLIProxyAPI/plugins/warp-egress.so
 ```
 
-或使用仓库脚本：
+或使用脚本：`./scripts/install-plugin.sh /path/to/CLIProxyAPI/plugins`。
 
-```bash
-./scripts/install-plugin.sh /path/to/CLIProxyAPI/plugins
-```
+## 配置 CLIProxyAPI
 
-### 第 1 步：修改 CLIProxyAPI 配置
-
-把 `config.example.yaml` 中的配置合并到现有 `config.yaml`：
+合并 `config.example.yaml` 到现有 `config.yaml`：
 
 ```yaml
 proxy-url: "socks5://127.0.0.1:40000"
@@ -119,27 +122,24 @@ plugins:
       allow-remote-listen: false
 ```
 
-`wgcf-path` / `wireproxy-path` 可省略（使用内嵌版本）；如需指定系统安装的特定版本可显式配置。
+`wgcf-path` / `wireproxy-path` 可省略（使用内嵌版本）。`proxy-url` 必须与插件的 `listen-host + global-port` 一致，否则全局出口切换不会影响 CPA 请求。
 
-> `proxy-url` 必须与插件的 `listen-host + global-port` 一致，否则全局出口切换不会影响 CLIProxyAPI 请求。
+## 创建出口
 
-### 第 2 步：创建出口（三种方式）
+### 方式一（推荐）：注册源导入
 
-#### 方式一（推荐）：注册源导入
+Cloudflare 注册接口按来源 IP 临时限流（429），数据中心/云环境 IP 极易触发。**在干净网络环境注册一次再导入，完全不触发限流**：
 
-Cloudflare 对 WARP 注册接口按来源 IP 临时限流（429），数据中心/云环境 IP 极易触发。**在干净网络环境注册一次，将配置导入插件，完全不触发限流**。
-
-1. 在任意不受限流的机器（家宽、手机流量）上注册并生成配置：
+1. 在不受限流的机器（家宽、手机流量）上：
 
    ```bash
-   # 下载 wgcf（见 https://github.com/ViRb3/wgcf/releases）
    ./wgcf register --accept-tos   # 生成 wgcf-account.toml
    ./wgcf generate                # 生成 wgcf-profile.conf
    ```
 
-   也可以使用浏览器一键生成器（warpper.me、itsyebekhe.github.io/warp），下载的 `warp.conf` 即同一格式。
+   也可用浏览器生成器（warpper.me、itsyebekhe.github.io/warp），下载的 `warp.conf` 即同一格式。
 
-2. 通过管理 API 导入（`wgcf_profile` 为 wgcf-profile.conf 的完整内容）：
+2. 通过管理 API 导入：
 
    ```bash
    CONF=$(cat wgcf-profile.conf)
@@ -149,49 +149,43 @@ Cloudflare 对 WARP 注册接口按来源 IP 临时限流（429），数据中�
      -d "{\"name\":\"注册源导入的出口\",\"wgcf_profile\":\"$CONF\"}"
    ```
 
-导入成功后自动分配独立 SOCKS5 端口并启动，即可在面板中设为全局出口。
+导入成功后自动分配独立 SOCKS5 端口并启动。
 
-#### 方式二：面板内直接注册
+### 方式二：面板内直接注册
 
-进入面板「WARP 配置」→「新增配置」→ 选择「托管 WARP」，插件调用内嵌 wgcf 完成注册。若本机 IP 触发 429，可在「通过已有出口注册」中选择一个已运行的出口（或自定义 `socks5://` 地址），注册请求将经该出口发出。API 参数为 `register_via`。
+面板「新增配置」→「托管 WARP」，插件调用内嵌 wgcf 注册。若本机 IP 触发 429，可在「通过已有出口注册」选择一个已运行出口或自定义 `socks5://` 地址（API 参数 `register_via`），注册请求经该出口发出。
 
-#### 方式三：接入外部 SOCKS5
+### 方式三：接入外部 SOCKS5
 
-面板「新增配置」→ 选择「外部 SOCKS5」，填写 `socks5://` 或 `socks5h://` 地址（暂不支持带认证的地址）。
+面板「新增配置」→「外部 SOCKS5」，填写 `socks5://` / `socks5h://` 地址（暂不支持带认证）。
 
-### 第 3 步：重启并打开面板
+## 面板使用
 
-```text
-http://你的CLIProxyAPI地址:8317/v0/resource/plugins/warp-egress/panel
-```
+面板地址：`http://你的CLIProxyAPI地址:8317/v0/resource/plugins/warp-egress/panel`，输入管理密钥后使用（密钥仅存于当前标签页 `sessionStorage`）。
 
-资源面板本身不携带管理权限。打开后输入 `remote-management.secret-key`，密钥仅保存在当前标签页 `sessionStorage`，随后调用受保护的 `/v0/management/warp-egress/*` 接口。
+使用顺序：
 
-## 面板使用顺序
-
-1. 进入「WARP 配置」，创建至少一个托管 WARP 出口（推荐方式一导入）。
+1. 创建至少一个托管 WARP 出口（推荐注册源导入）。
 2. 等待出口检测显示 `warp=on` 或 `warp=plus`。
 3. 把一个出口设为全局出口。
 4. 按需启用定时轮换或故障自动切换。
-5. 添加类型规则（认证类型下拉选择）和正则规则（常用模板可选）。
+5. 添加类型规则（认证类型下拉选择）与正则规则（常用模板可选）。
 6. 在认证文件表中为特殊账号选择单文件出口。
 7. 在「路由规则」页点击「保存并应用」（保存与应用为两步，应用才写入认证文件）。
 
-## 注册限流（429）说明
+### 注册限流（429）
 
-Cloudflare 注册接口（`api.cloudflareclient.com`）按来源 IP 临时限流（`429 Too Many Requests`，窗口约 15 分钟）。共享出口（数据中心 IP、WARP 出口 IP）均可能触发，插件已内置中文 429 提示并给出处置建议。
+`api.cloudflareclient.com` 按来源 IP 临时限流（约 15 分钟窗口），共享出口（数据中心 IP、WARP 出口 IP）均可能触发；插件内置中文 429 提示。
 
-规避方式：
-
-| 方式 | 原理 | 备注 |
+| 规避方式 | 原理 | 备注 |
 | --- | --- | --- |
-| 注册源导入（推荐） | 干净网络注册后导入，完全不调用注册接口 | 见「方式一」 |
+| 注册源导入（推荐） | 干净网络注册后导入，不调用注册接口 | 见「创建出口 方式一」 |
 | 通过已有出口注册 | 注册请求经所选出口发出 | WARP 出口 IP 同样可能被限流 |
 | 等待窗口 | 429 为临时限流，15-30 分钟后重试 | 最被动 |
 
-## 认证文件分流
+### 认证文件分流
 
-### 单文件出口三态
+单文件出口选项：
 
 | 选项 | 行为 |
 | --- | --- |
@@ -200,9 +194,7 @@ Cloudflare 注册接口（`api.cloudflareclient.com`）按来源 IP 临时限流
 | 自定义代理 | 显示并复用 CPA 认证文件中已有的代理地址（与 CPA 面板实时同步） |
 | 具体出口 | 绑定到指定 WARP / 外部 SOCKS5 出口 |
 
-### 正则目标字段
-
-正则规则可匹配：`name`（文件名）、`email`（邮箱）、`label`（标签）、`provider`（服务商）、`type`（类型）、`all`（合并匹配）。
+正则规则可匹配字段：`name`、`email`、`label`、`provider`、`type`、`all`（合并匹配）。
 
 ```text
 目标：email
@@ -230,114 +222,47 @@ POST /v0/management/warp-egress/auto/save
 POST /v0/management/warp-egress/auto/run
 ```
 
-认证方式：
-
-```http
-Authorization: Bearer <remote-management.secret-key>
-```
+认证方式：`Authorization: Bearer <remote-management.secret-key>`
 
 关键参数：
 
-- `POST /profiles/create`：托管模式可传 `register_via`（托管出口 ID 或 `socks5://` 地址），注册经该出口发出。
+- `POST /profiles/create`：托管模式可传 `register_via`（托管出口 ID 或 `socks5://` 地址）。
 - `POST /profiles/import`：`{name, wgcf_profile}`，导入 wgcf-profile.conf 内容，不触发注册。
-- `POST /auth-files/assign`：`{auth_index, profile_id | proxy_url, apply_now}`。`profile_id` 为空清除出口；`direct` 表示不设置代理（锁定清除）；`proxy_url` 字段写入任意自定义代理（与 CPA 认证文件同一字段）。
+- `POST /auth-files/assign`：`{auth_index, profile_id | proxy_url, apply_now}`。`profile_id` 为空清除出口；`direct` 表示不设置代理（锁定清除）；`proxy_url` 字段写入任意自定义代理。
 
-## 从源码构建
+## 构建与发布
+
+### 平台支持
+
+| 平台 | 架构 | 插件文件 | 构建方式 |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `warp-egress.so` | 交叉编译（arm64 需 `gcc-aarch64-linux-gnu`） |
+| Windows | amd64 | `warp-egress.dll` | 交叉编译（需 mingw-w64） |
+| macOS | amd64 / arm64 | `warp-egress.dylib` | 原生构建（macOS 主机，系统 clang） |
+
+CI 打标签（`v*`）自动构建并发布全部平台 zip 资产；`wgcf` / `wireproxy` 按构建平台自动下载对应版本内嵌，无需手工准备。
+
+### 本地构建
 
 ```bash
 make test
-make build
-```
-
-输出 `bin/warp-egress.so`（Windows 为 `.dll`、macOS 为 `.dylib`）与 `bin/warp-egress.h`。构建前会自动按目标平台下载内嵌的 wgcf/wireproxy；交叉构建 C 共享库需要目标平台的 C 编译器：
-
-```bash
 make build-linux-amd64                        # Linux x86-64
 make build-linux-arm64                        # Linux arm64（需 gcc-aarch64-linux-gnu）
 make build-windows-amd64                      # Windows x86-64（需 mingw-w64）
 make build-darwin-amd64 / build-darwin-arm64  # macOS（需在 macOS 主机上构建）
 ```
 
-发布打包见 `make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`），另提供 `release-windows-amd64`、`release-darwin-amd64`、`release-darwin-arm64` 便捷目标。仓库附带的二进制为 Linux x86-64、glibc 动态链接版本。
+发布打包：`make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`），另提供 `release-windows-amd64`、`release-darwin-amd64`、`release-darwin-arm64`。
 
-## Plugin Store 安装（推荐）
+### Registry 文件
 
-插件商店是 CLIProxyAPI 管理面板内置的一键安装入口：插件列表 → 点击安装 → 自动下载、校验并启用。
-
-### 前置：发布 Release 资产
-
-商店安装依赖 GitHub Release 上的产物（命名约定为 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，由 Release workflow 在打标签时自动产出）。首次使用前需要发布一次：
-
-```bash
-git tag v0.3.2 && git push origin v0.3.2
-```
-
-推标签后 CI 自动构建并发布全部平台资产（Linux amd64/arm64、Windows amd64、macOS amd64/arm64）。
-
-### 1. 添加商店源
-
-在 CLIProxyAPI 的 `config.yaml` 的 `plugins` 下追加本仓库的 registry 地址：
-
-```yaml
-plugins:
-  enabled: true
-  dir: "plugins"
-  store-sources:
-    - "https://raw.githubusercontent.com/imHansiy/warp-egress-plugin/main/registry.json"
-```
-
-`store-sources` 会追加到内置官方源之后（官方源为 `CLIProxyAPI-Plugins-Store` 仓库的 `registry.json`）。保存并重启 CLIProxyAPI 生效。
-
-### 2. 在管理面板安装
-
-1. 打开 CPA 管理面板：`http://你的CLIProxyAPI地址:8317/management.html`
-2. 进入「插件商店」（Plugin Store）页面
-3. 找到 **WARP Egress / WARP 出口管理**，点击安装
-4. CPA 自动完成：从仓库 GitHub Release 定位 `<id>_<version>_<goos>_<goarch>.zip` → 下载 → 用 `checksums.txt` 校验 SHA256 → 解压到 `plugins/` 目录 → 写入 `config.yaml` 启用该插件
-
-安装完成后即可按「快速安装」后续步骤配置出口。
-
-### 管理 API
-
-```text
-GET  /v0/management/plugin-store                 # 列出所有商店源的插件
-POST /v0/management/plugin-store/:id/install     # 安装指定插件（自动匹配当前平台）
-```
-
-## 手动发布与仓库文件
-
-仓库内提供三份 CLIProxyAPI Plugin Store schema v1 文件：
-
-- `registry.json`：中英双语默认版本
-- `registry.zh-CN.json`：纯中文版本
-- `registry.en.json`：纯英文版本
-
-CLIProxyAPI 当前 registry schema 没有单独的多语言字段，因此官方商店提交时通常只提交一个条目。发布前必须把三份文件中的：
-
-```text
-https://github.com/OWNER/warp-egress
-```
-
-替换为真实公开仓库地址。校验命令：
+仓库提供三份 Plugin Store schema v1 文件（`registry.json` 双语、`registry.zh-CN.json`、`registry.en.json`）。发布前将三份文件中的 `https://github.com/OWNER/warp-egress` 替换为真实仓库地址并执行：
 
 ```bash
 make registry-check
 ```
 
-手动构建官方格式的 Linux AMD64 Release 资产：
-
-```bash
-make release-linux-amd64
-```
-
-输出：
-
-```text
-dist/warp-egress_0.2.0_linux_amd64.zip
-dist/checksums.txt
-```
-
-Release 标签应使用 `v0.2.0`，压缩包根目录直接包含 `warp-egress.so`。详见 `REGISTRY.md`。
+详见 `REGISTRY.md`。
 
 ## 数据目录
 
@@ -352,9 +277,11 @@ warp-egress-data/
         └── wireproxy.log
 ```
 
-注册资料包含私钥，目录权限默认 `0700`，状态与配置文件默认 `0600`。不要将该目录提交到 Git。
+注册资料包含私钥：目录权限默认 `0700`，状态与配置文件默认 `0600`。不要提交到 Git。
 
-## 限制
+## 限制与安全
+
+限制：
 
 - WARP 配置数量不等于唯一出口 IP 数量：免费版 IPv4 出口全局共享（如 `104.28.222.43`），区分出口以 IPv6 为准。
 - 重新注册配置后出口可能变化，也可能不变。
@@ -364,10 +291,9 @@ warp-egress-data/
 - 插件不会按请求重新注册 WARP，避免中断流式请求与高频创建设备。
 - 尚未在所有 CLIProxyAPI 发行版与架构上做集成测试；首次部署请先备份认证目录。
 
-## 安全建议
+安全建议：
 
-- 保持 `listen-host: 127.0.0.1`。
+- 保持 `listen-host: 127.0.0.1`，不要对外开放 `40000` 与 `41000-41999` 端口。
 - 保持 `remote-management.allow-remote: false`，或在反向代理层增加额外认证。
 - 先备份 CLIProxyAPI 的 `auth-dir`，再首次执行「保存并应用」。
-- 不要对外开放 `40000` 与 `41000-41999` 端口。
 - 使用系统服务管理 CLIProxyAPI，避免插件被强制终止时留下不完整操作。
