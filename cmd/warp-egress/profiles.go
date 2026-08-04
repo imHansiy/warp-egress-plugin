@@ -48,7 +48,7 @@ func normalizeSOCKSURL(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-func (m *Manager) RegisterManagedProfile(profile *Profile) error {
+func (m *Manager) RegisterManagedProfile(profile *Profile, registerVia string) error {
 	if profile == nil || profile.Mode != ProfileModeManaged {
 		return errors.New("managed profile is required")
 	}
@@ -71,9 +71,25 @@ func (m *Manager) RegisterManagedProfile(profile *Profile) error {
 	register := exec.Command(cfg.WGCFPath, "register", "--accept-tos")
 	register.Dir = profile.Directory
 	register.Env = append(os.Environ(), "HOME="+profile.Directory)
+	var proxy *registerProxy
+	if registerVia != "" {
+		var err error
+		proxy, err = startRegisterProxy(registerVia)
+		if err != nil {
+			return fmt.Errorf("start register proxy: %w", err)
+		}
+		register.Env = append(register.Env, "HTTPS_PROXY="+proxy.URL(), "HTTP_PROXY="+proxy.URL())
+	}
 	output, err := register.CombinedOutput()
+	if proxy != nil {
+		proxy.Close()
+	}
 	if err != nil {
-		return fmt.Errorf("wgcf register failed: %s: %w", strings.TrimSpace(string(output)), err)
+		msg := strings.TrimSpace(string(output))
+		if isRateLimited(msg) {
+			return fmt.Errorf("WARP 注册被 Cloudflare 限流（429 Too Many Requests）：当前服务器出口 IP 短时间内注册过频，请等待 15-30 分钟后再试；仍失败可改用「导入已有配置」或「外部 SOCKS5」方式创建出口。原始输出：%s（%w）", trimWGCFOutput(msg), err)
+		}
+		return fmt.Errorf("wgcf register failed: %s: %w", msg, err)
 	}
 	generate := exec.Command(cfg.WGCFPath, "generate")
 	generate.Dir = profile.Directory
@@ -86,6 +102,22 @@ func (m *Manager) RegisterManagedProfile(profile *Profile) error {
 		return fmt.Errorf("wgcf profile missing: %w", err)
 	}
 	return m.writeWireproxyConfig(profile, wgPath)
+}
+
+// isRateLimited 判断 wgcf 输出是否为 Cloudflare 注册接口限流（HTTP 429）。
+func isRateLimited(output string) bool {
+	return strings.Contains(output, "429") && strings.Contains(output, "Too Many Requests")
+}
+
+// trimWGCFOutput 截断 wgcf 的堆栈输出，只保留到 "attached stack trace" 之前的关键信息。
+func trimWGCFOutput(output string) string {
+	if idx := strings.Index(output, "attached stack trace"); idx >= 0 {
+		return strings.TrimSpace(output[:idx])
+	}
+	if len(output) > 500 {
+		return strings.TrimSpace(output[:500]) + "…"
+	}
+	return output
 }
 
 func (m *Manager) writeWireproxyConfig(profile *Profile, wgPath string) error {
@@ -208,7 +240,7 @@ func (m *Manager) RecreateProfile(id string) error {
 	for _, name := range []string{"wgcf-account.toml", "wgcf-profile.conf", "wireproxy.conf"} {
 		_ = os.Remove(filepath.Join(profile.Directory, name))
 	}
-	if err := m.RegisterManagedProfile(profile); err != nil {
+	if err := m.RegisterManagedProfile(profile, ""); err != nil {
 		return err
 	}
 	if err := m.StartProfile(id); err != nil {

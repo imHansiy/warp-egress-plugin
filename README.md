@@ -59,38 +59,14 @@ CLIProxyAPI 全局 proxy-url
 
 - 支持动态插件的 CLIProxyAPI 版本
 - Linux x86-64：可直接使用 `bin/warp-egress.so`
-- `wgcf`：注册并生成 WARP WireGuard 配置
-- `wireproxy`：把每个 WireGuard 配置暴露为独立 SOCKS5 端口
+- `wgcf` 和 `wireproxy` 已内置进插件，无需单独安装；找不到时自动解压到 data-dir/bin
 - 管理 API 必须配置 `remote-management.secret-key`
 
-`wgcf` 和 `wireproxy` 均为第三方开源项目，不是 Cloudflare 官方 WARP 客户端。本项目不会打包或分发这两个二进制文件。
+`wgcf` 和 `wireproxy` 均为第三方开源项目，不是 Cloudflare 官方 WARP 客户端。本项目不会直接分发这两个二进制文件，构建时从各自 GitHub Release 下载并内嵌。
 
 ## 快速安装
 
-### 1. 安装 wgcf 和 wireproxy
-
-服务器已经安装 Go 时：
-
-```bash
-cd warp-egress-plugin
-./scripts/install-tools.sh
-```
-
-默认安装版本：
-
-- wgcf `v2.2.31`
-- wireproxy `v1.1.2`
-
-也可以覆盖：
-
-```bash
-WGCF_VERSION=v2.2.31 \
-WIREPROXY_VERSION=v1.1.2 \
-INSTALL_DIR=$HOME/.local/bin \
-./scripts/install-tools.sh
-```
-
-### 2. 安装插件
+### 1. 安装插件
 
 把预编译文件复制到 CLIProxyAPI 的插件目录：
 
@@ -105,6 +81,10 @@ chmod 755 /path/to/CLIProxyAPI/plugins/warp-egress.so
 ```bash
 ./scripts/install-plugin.sh /path/to/CLIProxyAPI/plugins
 ```
+
+插件已内置 wgcf 和 wireproxy，无需在服务器上单独安装；首次启动自动解压到 data-dir/bin。如需使用系统安装的版本，可在插件配置中指定 `wgcf-path` / `wireproxy-path`。
+
+### 3. 修改 CLIProxyAPI 配置
 
 ### 3. 修改 CLIProxyAPI 配置
 
@@ -125,8 +105,6 @@ plugins:
       enabled: true
       priority: 10
       data-dir: "./warp-egress-data"
-      wgcf-path: "wgcf"
-      wireproxy-path: "wireproxy"
       listen-host: "127.0.0.1"
       global-port: 40000
       profile-port-start: 41000
@@ -136,6 +114,8 @@ plugins:
       ip-check-url: "https://www.cloudflare.com/cdn-cgi/trace"
       allow-remote-listen: false
 ```
+
+`wgcf-path` / `wireproxy-path` 已省略：插件内置这两个工具，找不到时自动解压到 data-dir/bin。如需覆盖（如使用系统安装的特定版本），可添加对应字段。
 
 `proxy-url` 必须和插件的 `listen-host + global-port` 一致，否则全局出口切换只会改变插件中继，不会影响 CLIProxyAPI 请求。
 

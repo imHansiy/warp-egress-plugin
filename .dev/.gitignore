@@ -1,0 +1,5 @@
+# 开发环境运行时产物，不应提交
+plugins/
+auths/
+logs/
+warp-egress-data/

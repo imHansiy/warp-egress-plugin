@@ -1,0 +1,63 @@
+# warp-egress 插件本地开发环境
+#
+# 用法：
+#   1. 构建插件并启动：docker compose up -d --build
+#      （builder 服务会先编译出 .dev/plugins/warp-egress.so，再由 cli-proxy-api 加载）
+#   2. 修改插件源码后重新编译：docker compose run --rm builder
+#   3. 让 CLIProxyAPI 重新加载插件：docker compose restart cli-proxy-api
+#   4. 查看日志：docker compose logs -f cli-proxy-api
+#   5. 停止：docker compose down
+#
+# 端口：
+#   - 18317  CLIProxyAPI 主服务（面板/管理 API），仅绑定本机回环
+#            （本机 8317 常被已有 CLIProxyAPI 占用，测试实例用 18317 避开）
+#   - 44000  插件全局 SOCKS5 中继（容器内固定 40000，宿主映射 44000 避开已有实例）
+#            proxy-url 在容器内仍指向 127.0.0.1:40000，不受宿主端口影响
+#
+# 数据目录（挂载自 .dev/，容器重启不丢失）：
+#   - .dev/auths            -> /root/.cli-proxy-api  （认证文件）
+#   - .dev/plugins          -> /CLIProxyAPI/plugins  （插件 .so）
+#   - .dev/warp-egress-data -> /CLIProxyAPI/warp-egress-data （WARP 配置/私钥）
+#   - .dev/logs             -> /CLIProxyAPI/logs
+
+name: warp-egress-dev
+
+services:
+  # ---- 编译插件：CGO c-shared 需要 Linux + gcc，用 golang 官方镜像跨平台构建 ----
+  builder:
+    image: golang:1.25-bookworm
+    working_dir: /src
+    volumes:
+      - ..:/src                # 仓库根目录（含 cmd/、go.mod）
+    # 注意：login shell(-l)会重置 PATH 丢掉 go，必须用非 login shell
+    command: >
+      sh -c 'set -e
+      && echo "==> download embedded tools"
+      && ./scripts/download-tools.sh
+      && echo "==> go build warp-egress.so"
+      && CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -ldflags="-s -w" -o /src/.dev/plugins/warp-egress.so ./cmd/warp-egress
+      && echo "==> done"
+      && ls -la /src/.dev/plugins/'
+
+  # ---- 运行环境：CLIProxyAPI + wgcf + wireproxy（Dockerfile 内安装）----
+  cli-proxy-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: warp-egress-cli-proxy-api
+    working_dir: /CLIProxyAPI
+    # wireproxy 需要创建 TUN 接口建立 WireGuard 隧道，必须挂载 tun 设备并授予 NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "127.0.0.1:18317:8317"
+      - "127.0.0.1:44000:40000"
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./auths:/root/.cli-proxy-api
+      - ./plugins:/CLIProxyAPI/plugins
+      - ./warp-egress-data:/CLIProxyAPI/warp-egress-data
+      - ./logs:/CLIProxyAPI/logs
+    restart: unless-stopped

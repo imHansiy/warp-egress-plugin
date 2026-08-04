@@ -22,6 +22,8 @@ type onboardingStep struct {
 type onboardingStatus struct {
 	WGCFInstalled      bool             `json:"wgcf_installed"`
 	WireproxyInstalled bool             `json:"wireproxy_installed"`
+	WGCFBundled        bool             `json:"wgcf_bundled"`
+	WireproxyBundled   bool             `json:"wireproxy_bundled"`
 	WGCFPath           string           `json:"wgcf_path"`
 	WireproxyPath      string           `json:"wireproxy_path"`
 	HasWARPProfiles    bool             `json:"has_warp_profiles"`
@@ -114,13 +116,20 @@ func (m *Manager) OnboardingStatus() onboardingStatus {
 	cfg := m.currentConfig()
 	expected := "socks5://" + strings.TrimSpace(cfg.ListenHost) + ":" + strconv.Itoa(cfg.GlobalPort)
 
+	// 插件内置二进制解压到 <data-dir>/bin，据此标记 bundled 状态
+	binDir := filepath.Join(cfg.DataDir, "bin")
+	wgcfBundled := strings.HasPrefix(cfg.WGCFPath, binDir+string(os.PathSeparator))
+	wireproxyBundled := strings.HasPrefix(cfg.WireproxyPath, binDir+string(os.PathSeparator))
+
 	status := onboardingStatus{
-		WGCFInstalled:    commandExists(cfg.WGCFPath),
+		WGCFInstalled:      commandExists(cfg.WGCFPath),
 		WireproxyInstalled: commandExists(cfg.WireproxyPath),
-		WGCFPath:         cfg.WGCFPath,
-		WireproxyPath:    cfg.WireproxyPath,
-		ExpectedProxyURL: expected,
-		DataDir:          cfg.DataDir,
+		WGCFBundled:        wgcfBundled,
+		WireproxyBundled:   wireproxyBundled,
+		WGCFPath:           cfg.WGCFPath,
+		WireproxyPath:      cfg.WireproxyPath,
+		ExpectedProxyURL:   expected,
+		DataDir:            cfg.DataDir,
 	}
 
 	store := m.stateStore()
@@ -141,15 +150,25 @@ func (m *Manager) OnboardingStatus() onboardingStatus {
 	status.Steps = []onboardingStep{
 		{
 			Key:   "wgcf",
-			Title: "安装 wgcf（WARP 注册工具）",
+			Title: "wgcf（WARP 注册工具）",
 			Done:  status.WGCFInstalled,
-			Hint:  "执行 ./scripts/install-tools.sh，或把 wgcf 二进制放入 PATH；也可在插件配置中指定 wgcf-path。",
+			Hint: func() string {
+				if status.WGCFBundled {
+					return "插件已内置 wgcf，自动解压到 " + status.WGCFPath + "，无需手动安装。"
+				}
+				return "未检测到 wgcf：可显式配置 wgcf-path，或把 wgcf 二进制放入 PATH。"
+			}(),
 		},
 		{
 			Key:   "wireproxy",
-			Title: "安装 wireproxy（WireGuard → SOCKS5）",
+			Title: "wireproxy（WireGuard → SOCKS5）",
 			Done:  status.WireproxyInstalled,
-			Hint:  "wireproxy 负责把每个 WARP 配置暴露为独立 SOCKS5 端口，安装方式同上。",
+			Hint: func() string {
+				if status.WireproxyBundled {
+					return "插件已内置 wireproxy，自动解压到 " + status.WireproxyPath + "，无需手动安装。"
+				}
+				return "未检测到 wireproxy：可显式配置 wireproxy-path，或把 wireproxy 二进制放入 PATH。"
+			}(),
 		},
 		{
 			Key:   "profiles",
@@ -167,7 +186,7 @@ func (m *Manager) OnboardingStatus() onboardingStatus {
 			Key:   "proxy",
 			Title: "配置 CPA 代理指向插件中继",
 			Done:  status.ProxyConfigured,
-			Hint:  "在 CPA config.yaml 中设置 proxy-url: " + expected + "，然后重启 CPA。当前检测到: " +
+			Hint: "在 CPA config.yaml 中设置 proxy-url: " + expected + "，然后重启 CPA。当前检测到: " +
 				func() string {
 					if status.ProxyURL == "" {
 						return "未配置（未找到 proxy-url）"

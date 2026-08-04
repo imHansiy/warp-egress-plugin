@@ -29,6 +29,13 @@ func (m *Manager) resolveRoute(entry hostAuthFileEntry) EffectiveRoute {
 			continue
 		}
 		if id := strings.TrimSpace(rules.ExactRules[key]); id != "" {
+			if proxyURL, ok := customExactProxy(id); ok {
+				return EffectiveRoute{RuleType: "exact", RuleKey: key, ProxyURL: proxyURL}
+			}
+			if id == exactDirect {
+				// 不设置代理：清除 proxy_url，跟随 CPA 全局配置，且不被其他规则接管。
+				return EffectiveRoute{RuleType: "inherit", RuleKey: key}
+			}
 			return profileFor(id, "exact", key)
 		}
 	}
@@ -83,6 +90,15 @@ func regexTargetValue(entry hostAuthFileEntry, target string) string {
 	}
 }
 
+// customExactProxy 判断 exact 规则值是否为自定义代理（"custom:<proxy_url>"），并返回代理地址。
+func customExactProxy(value string) (string, bool) {
+	if strings.HasPrefix(value, exactCustomPrefix) {
+		proxyURL := strings.TrimSpace(strings.TrimPrefix(value, exactCustomPrefix))
+		return proxyURL, proxyURL != ""
+	}
+	return "", false
+}
+
 func validateRules(store *StateStore, rules Rules) error {
 	for _, rule := range rules.RegexRules {
 		if !rule.Enabled {
@@ -110,8 +126,13 @@ func validateRules(store *StateStore, rules Rules) error {
 		}
 	}
 	for _, id := range rules.ExactRules {
-		if id != "" && store.Profile(id) == nil {
-			return fmt.Errorf("exact rule profile not found: %s", id)
+		if id != "" && id != exactDirect {
+			if _, ok := customExactProxy(id); ok {
+				continue
+			}
+			if store.Profile(id) == nil {
+				return fmt.Errorf("exact rule profile not found: %s", id)
+			}
 		}
 	}
 	if rules.GlobalProfileID != "" && store.Profile(rules.GlobalProfileID) == nil {
@@ -264,14 +285,22 @@ func (m *Manager) AssignExact(req exactAssignRequest) (ApplyItemResult, error) {
 	if authIndex == "" {
 		return ApplyItemResult{}, errors.New("auth_index is required")
 	}
-	if req.ProfileID != "" && m.stateStore().Profile(req.ProfileID) == nil {
-		return ApplyItemResult{}, errors.New("profile not found")
+	exactValue := strings.TrimSpace(req.ProfileID)
+	if exactValue == "" && strings.TrimSpace(req.ProxyURL) != "" {
+		exactValue = exactCustomPrefix + strings.TrimSpace(req.ProxyURL)
 	}
-	if err := m.stateStore().AssignExact(authIndex, req.ProfileID); err != nil {
+	if exactValue != "" && exactValue != exactDirect {
+		if _, isCustom := customExactProxy(exactValue); isCustom {
+			// 自定义代理：直接写 CPA 认证文件的 proxy_url 字段，不依赖插件出口。
+		} else if m.stateStore().Profile(exactValue) == nil {
+			return ApplyItemResult{}, errors.New("profile not found")
+		}
+	}
+	if err := m.stateStore().AssignExact(authIndex, exactValue); err != nil {
 		return ApplyItemResult{}, err
 	}
 	if !req.ApplyNow {
-		return ApplyItemResult{AuthIndex: authIndex, ProfileID: req.ProfileID, Changed: true}, nil
+		return ApplyItemResult{AuthIndex: authIndex, ProfileID: exactValue, Changed: true}, nil
 	}
 	entries, err := callHostAuthList()
 	if err != nil {

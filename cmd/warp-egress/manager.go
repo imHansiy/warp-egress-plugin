@@ -40,6 +40,12 @@ func (m *Manager) Configure(raw []byte) error {
 	if err := ensureDataDir(cfg); err != nil {
 		return err
 	}
+	// 未显式配置 wgcf-path/wireproxy-path 且 PATH 中找不到时，
+	// 自动解压插件内置二进制到 data-dir/bin，实现服务器零安装。
+	cfg, err = ensureBundledTools(cfg)
+	if err != nil {
+		return err
+	}
 
 	m.stopOwnedProcesses()
 	m.mu.Lock()
@@ -256,7 +262,11 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 		if err := os.MkdirAll(profile.Directory, 0o700); err != nil {
 			return nil, err
 		}
-		if err := m.RegisterManagedProfile(profile); err != nil {
+		registerVia, err := m.resolveRegisterProxy(req.RegisterVia)
+		if err != nil {
+			return nil, err
+		}
+		if err := m.RegisterManagedProfile(profile, registerVia); err != nil {
 			return nil, err
 		}
 	}
@@ -271,6 +281,29 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 	}
 	_ = m.CheckProfile(profile.ID)
 	return m.stateStore().Profile(profile.ID), nil
+}
+
+// resolveRegisterProxy 把创建请求里的 register_via 解析为 SOCKS5 代理地址：
+// 空串表示直连；socks5:// 开头表示自定义地址；否则视为已有托管出口的 ID。
+func (m *Manager) resolveRegisterProxy(via string) (string, error) {
+	via = strings.TrimSpace(via)
+	if via == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(via, "socks5://") || strings.HasPrefix(via, "socks5h://") {
+		return normalizeSOCKSURL(via)
+	}
+	p := m.stateStore().Profile(via)
+	if p == nil {
+		return "", fmt.Errorf("register_via profile %q not found", via)
+	}
+	if p.Mode != ProfileModeManaged {
+		return "", errors.New("register_via must be a managed profile")
+	}
+	if !p.Running {
+		return "", errors.New("register_via profile is not running")
+	}
+	return p.ProxyURL, nil
 }
 
 func (m *Manager) ImportProfile(req importProfileRequest) (*Profile, error) {
@@ -308,7 +341,7 @@ func (m *Manager) ImportProfile(req importProfileRequest) (*Profile, error) {
 	if err := os.WriteFile(wgPath, []byte(content), 0o600); err != nil {
 		return nil, err
 	}
-	if err := m.RegisterManagedProfile(profile); err != nil {
+	if err := m.RegisterManagedProfile(profile, ""); err != nil {
 		return nil, err
 	}
 	if err := m.stateStore().AddProfile(profile); err != nil {

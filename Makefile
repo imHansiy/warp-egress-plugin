@@ -10,7 +10,11 @@ GOOS ?= linux
 GOARCH ?= amd64
 CC ?= gcc
 
-.PHONY: test build build-linux-amd64 clean install registry-check smoke release release-linux-amd64
+.PHONY: test build build-linux-amd64 clean install registry-check smoke release release-linux-amd64 embedded-tools
+
+# 下载 wgcf/wireproxy 官方二进制供 go:embed 内嵌（产物在 cmd/warp-egress/embedded_tools/，不入库）
+embedded-tools:
+	./scripts/download-tools.sh
 
 test:
 	go test ./...
@@ -18,11 +22,11 @@ test:
 registry-check:
 	python3 scripts/validate-registry.py
 
-build: test
+build: embedded-tools test
 	mkdir -p $(OUT_DIR)
 	CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).so $(PKG)
 
-build-linux-amd64: test
+build-linux-amd64: embedded-tools test
 	mkdir -p $(OUT_DIR)
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o $(OUT_DIR)/$(PLUGIN_NAME).so $(PKG)
 
@@ -43,7 +47,7 @@ smoke: build
 # 用法：
 #   make release VERSION=0.2.0
 #   make release GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc VERSION=0.2.0
-release: test registry-check
+release: embedded-tools test registry-check
 	rm -rf dist/release-$(GOOS)-$(GOARCH)
 	mkdir -p dist/release-$(GOOS)-$(GOARCH) dist
 	CC="$(CC)" CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -buildmode=c-shared -ldflags="-s -w" -o dist/release-$(GOOS)-$(GOARCH)/$(PLUGIN_NAME).so $(PKG)

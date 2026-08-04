@@ -16,6 +16,8 @@ type Config struct {
 	DataDir             string
 	WGCFPath            string
 	WireproxyPath       string
+	WGCFPathSet         bool // 配置中显式指定了 wgcf-path
+	WireproxyPathSet    bool // 配置中显式指定了 wireproxy-path
 	ListenHost          string
 	GlobalPort          int
 	ProfilePortStart    int
@@ -50,9 +52,11 @@ func parseConfig(raw []byte) (Config, error) {
 	}
 	if value := values["wgcf-path"]; value != "" {
 		cfg.WGCFPath = value
+		cfg.WGCFPathSet = true
 	}
 	if value := values["wireproxy-path"]; value != "" {
 		cfg.WireproxyPath = value
+		cfg.WireproxyPathSet = true
 	}
 	if value := values["listen-host"]; value != "" {
 		cfg.ListenHost = value

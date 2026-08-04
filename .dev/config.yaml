@@ -1,0 +1,33 @@
+# CLIProxyAPI 测试配置（.dev 开发环境专用）
+# 挂载到容器 /CLIProxyAPI/config.yaml。所有路径使用容器内绝对路径。
+
+port: 8317
+log_level: debug
+
+# 全局出口固定指向插件中继；插件与 CLIProxyAPI 同容器，127.0.0.1 即插件自身。
+proxy-url: "socks5://127.0.0.1:40000"
+
+remote-management:
+  # 开发测试环境经 Docker 端口映射访问，来源 IP 非 localhost，需放开远程访问
+  # （生产环境务必改回 false，且仅在反向代理层加认证后暴露）
+  allow-remote: true
+  secret-key: "dev-warp-egress-secret-8f3a1c"
+
+plugins:
+  enabled: true
+  dir: "/CLIProxyAPI/plugins"
+  configs:
+    warp-egress:
+      enabled: true
+      priority: 10
+      data-dir: "/CLIProxyAPI/warp-egress-data"
+      wgcf-path: "wgcf"
+      wireproxy-path: "wireproxy"
+      listen-host: "127.0.0.1"
+      global-port: 40000
+      profile-port-start: 41000
+      profile-port-end: 41999
+      auto-start: true
+      health-check-interval: "60s"
+      ip-check-url: "https://www.cloudflare.com/cdn-cgi/trace"
+      allow-remote-listen: false
