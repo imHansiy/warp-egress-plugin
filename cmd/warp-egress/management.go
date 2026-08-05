@@ -29,6 +29,7 @@ func pluginRegistration() registration {
 				{Name: "health-check-interval", Type: "string", Description: "自动出口检测间隔，如 60s；设为 0 禁用。"},
 				{Name: "ip-check-url", Type: "string", Description: "出口 IP/WARP 状态检测地址。"},
 				{Name: "allow-remote-listen", Type: "boolean", Description: "允许 SOCKS5 监听非回环地址；默认关闭。"},
+				{Name: "state-json", Type: "string", Description: "面板配置的权威来源（JSON，设置弹窗「导出配置段」生成）。配合 CPA 配置体系/外部数据库统一管理；非空时优先于本地 state.json。"},
 			},
 		},
 		Capabilities: registrationCapabilities{ManagementAPI: true, UsagePlugin: true, RequestInterceptor: true, ResponseStreamInterceptor: true},
@@ -61,6 +62,7 @@ func managementRoutes() managementRegistration {
 			{Method: http.MethodGet, Path: "/warp-egress/settings"},
 			{Method: http.MethodPost, Path: "/warp-egress/settings/save"},
 			{Method: http.MethodPost, Path: "/warp-egress/settings/cleanup"},
+			{Method: http.MethodGet, Path: "/warp-egress/config/export"},
 		},
 	}
 }
@@ -274,6 +276,15 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 	case "POST /warp-egress/settings/cleanup":
 		m.cleanupUnhealthy()
 		return jsonResponse(http.StatusOK, map[string]any{"ok": true}), nil
+	case "GET /warp-egress/config/export":
+		// 导出当前全部面板配置为 state-json 片段，供写入 config.yaml
+		// 插件段（配合 CPA 配置体系/外部数据库统一管理插件配置）。
+		state := m.stateStore().Snapshot()
+		raw, err := json.MarshalIndent(state, "", "  ")
+		if err != nil {
+			return jsonResponse(http.StatusInternalServerError, map[string]any{"error": err.Error()}), nil
+		}
+		return jsonResponse(http.StatusOK, map[string]any{"state_json": string(raw)}), nil
 	default:
 		return jsonResponse(http.StatusNotFound, map[string]any{"error": "route not found", "method": method, "path": path}), nil
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -91,6 +92,17 @@ func (m *Manager) Configure(raw []byte) error {
 	}
 	if err := m.store.Load(); err != nil {
 		return fmt.Errorf("load state: %w", err)
+	}
+	// 配置文件权威：config.yaml 插件段的 state-json（CPA 配置体系/数据库
+	// 管理的插件配置）优先于本地 state.json，重配/重启后恢复文件值。
+	if cfg.StateJSON != "" {
+		var authoritative PersistedState
+		if err := json.Unmarshal([]byte(cfg.StateJSON), &authoritative); err != nil {
+			return fmt.Errorf("state-json: %w", err)
+		}
+		if err := m.store.ReplaceState(authoritative); err != nil {
+			return fmt.Errorf("apply state-json: %w", err)
+		}
 	}
 	if err := m.relay.Start(); err != nil {
 		m.setLastError(err.Error())

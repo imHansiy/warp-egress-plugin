@@ -26,6 +26,11 @@ type Config struct {
 	HealthCheckInterval time.Duration
 	IPCheckURL          string
 	AllowRemoteListen   bool
+	// StateJSON 面板配置的权威来源（JSON 字符串，写入 config.yaml 插件段）：
+	// 配置了 CPA 外部数据库（Postgres）等集中管理时，把导出的 state_json
+	// 填进 config.yaml 插件段，插件配置即可随 CPA 配置体系（数据库）走。
+	// 非空时优先于本地 state.json（配置文件权威，重启/重配后恢复文件值）。
+	StateJSON string
 }
 
 func defaultConfig() Config {
@@ -109,6 +114,9 @@ func parseConfig(raw []byte) (Config, error) {
 			return cfg, fmt.Errorf("allow-remote-listen: %w", err)
 		}
 		cfg.AllowRemoteListen = b
+	}
+	if value := values["state-json"]; value != "" {
+		cfg.StateJSON = strings.TrimSpace(value)
 	}
 	if cfg.GlobalPort < 1 || cfg.GlobalPort > 65535 {
 		return cfg, fmt.Errorf("global-port out of range")

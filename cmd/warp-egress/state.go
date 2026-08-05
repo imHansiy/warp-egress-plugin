@@ -59,6 +59,27 @@ func (s *StateStore) Save() error {
 	return writeAtomicJSON(s.path, snapshot, 0o600)
 }
 
+// ReplaceState 用权威配置源（config.yaml 插件段 state-json）整体替换状态并落盘。
+func (s *StateStore) ReplaceState(state PersistedState) error {
+	if state.Rules.ExactRules == nil {
+		state.Rules.ExactRules = map[string]string{}
+	}
+	if state.AutoBoundAuths == nil {
+		state.AutoBoundAuths = map[string]string{}
+	}
+	for _, p := range state.Profiles {
+		if p == nil {
+			continue
+		}
+		p.Running = false
+		p.PID = 0
+	}
+	s.mu.Lock()
+	s.state = state
+	s.mu.Unlock()
+	return s.Save()
+}
+
 func cloneState(src PersistedState) PersistedState {
 	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, Settings: src.Settings, AutoBoundAuths: map[string]string{}}
 	for key, value := range src.AutoBoundAuths {

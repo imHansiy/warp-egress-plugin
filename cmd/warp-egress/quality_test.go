@@ -719,6 +719,45 @@ func TestMinHealthyClampedToMaxProfiles(t *testing.T) {
 	}
 }
 
+func TestStateJSONAuthoritativeOverride(t *testing.T) {
+	manager := newTestManager(t)
+	if err := manager.store.AddProfile(&Profile{ID: "local", Name: "local", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41001"}); err != nil {
+		t.Fatal(err)
+	}
+	// 配置文件权威：state-json 提供完整状态并覆盖本地 state.json。
+	raw := `{"version":1,"profiles":[{"id":"cfg","name":"from-config","mode":"external","proxy_url":"socks5://127.0.0.1:41002","healthy":true}],"rules":{"global_profile_id":"cfg","type_rules":[],"regex_rules":[],"exact_rules":{"a":"cfg"}},"quality":{"enabled":true,"soft_tps":123},"settings":{"cleanup_unhealthy_enabled":true}}`
+	var authoritative PersistedState
+	if err := json.Unmarshal([]byte(raw), &authoritative); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.store.ReplaceState(authoritative); err != nil {
+		t.Fatal(err)
+	}
+	profiles := manager.store.Profiles()
+	if len(profiles) != 1 || profiles[0].ID != "cfg" {
+		t.Fatalf("state-json must replace local state, got %d profiles", len(profiles))
+	}
+	if profiles[0].Running || profiles[0].PID != 0 {
+		t.Fatal("replaced profiles must be reset to stopped")
+	}
+	if got := manager.store.Quality(); got.SoftTPS != 123 || !got.Enabled {
+		t.Fatalf("quality not applied from state-json: %+v", got)
+	}
+	if got := manager.store.Settings(); !got.CleanupUnhealthy {
+		t.Fatal("settings not applied from state-json")
+	}
+	if got := manager.store.Rules(); got.GlobalProfileID != "cfg" || got.ExactRules["a"] != "cfg" {
+		t.Fatalf("rules not applied from state-json: %+v", got)
+	}
+	// 落盘后可重新加载。
+	if err := manager.store.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.store.Profile("cfg"); got == nil {
+		t.Fatal("state-json state must survive reload")
+	}
+}
+
 func TestQualityStateDefaultsAndRoundTrip(t *testing.T) {
 	manager := newTestManager(t)
 	q := manager.store.Quality()
