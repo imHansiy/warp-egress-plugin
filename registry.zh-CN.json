@@ -6,7 +6,7 @@
       "name": "WARP 出口管理",
       "description": "为 CLIProxyAPI 提供可视化 WARP 出口池、全局出口热切换、定时轮换、异常故障转移、正则分流和认证文件级代理绑定。",
       "author": "寒思逸",
-      "version": "0.2.0",
+      "version": "0.4.0",
       "repository": "https://github.com/imHansiy/warp-egress-plugin",
       "homepage": "https://github.com/imHansiy/warp-egress-plugin",
       "license": "MIT",
