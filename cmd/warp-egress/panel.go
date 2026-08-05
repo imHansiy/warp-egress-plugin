@@ -38,9 +38,10 @@ button,input,select{font:inherit}button{border:0}button:focus-visible,input:focu
 .rule-block{border:1px solid var(--line);border-radius:11px;margin-bottom:14px;overflow:hidden}.rule-head{padding:12px 14px;background:#fafbfd;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line)}.rule-head strong{font-size:13px}.rule-body{padding:12px 14px}.rule-row{display:grid;grid-template-columns:32px minmax(120px,.8fr) minmax(160px,1.2fr) 34px;gap:8px;align-items:center;margin-bottom:8px}.rule-row.regex{grid-template-columns:32px 120px minmax(180px,1fr) minmax(150px,.8fr) 34px}.rule-row:last-child{margin-bottom:0}.toggle{width:34px;height:20px;position:relative;display:inline-block}.toggle input{display:none}.toggle span{position:absolute;inset:0;border-radius:999px;background:#cdd6e2;cursor:pointer;transition:.15s}.toggle span:after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:3px;left:3px;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:.15s}.toggle input:checked+span{background:var(--blue)}.toggle input:checked+span:after{transform:translateX(14px)}
 .auth-toolbar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px}.auth-toolbar .input{min-width:250px}.auth-table{border:1px solid var(--line);border-radius:10px;overflow:auto}.auth-table table{min-width:700px}.route-note{font-size:11px;color:var(--muted)}
 .pager{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.pager-btns{display:flex;gap:6px;align-items:center}.pager strong{color:var(--text)}
-.auto-grid{display:grid;gap:12px}.setting{border:1px solid var(--line);border-radius:10px;padding:12px 13px}.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px}.setting strong{display:block;font-size:13px}.setting p{margin:3px 0 0;color:var(--muted);font-size:11px}.setting .field{margin-top:10px}
+.provision-notice{display:block;margin-bottom:10px;padding:9px 12px;border:1px solid #eadfbf;background:var(--amber-soft);border-radius:10px;color:var(--amber);font-size:12px;line-height:1.5}.provision-notice.ok{border-color:#bfe3cf;background:#effaf3;color:#2e7d4f}.provision-notice.hidden{display:none}
+.auto-grid{display:grid;gap:12px}.setting{border:1px solid var(--line);border-radius:10px;padding:12px 13px}.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px}.setting-row>div:first-child{flex:1;min-width:0}.setting strong{display:block;font-size:13px}.setting p{margin:3px 0 0;color:var(--muted);font-size:11px}.setting .field{margin-top:10px}
 .toast-area{position:fixed;right:20px;bottom:20px;display:grid;gap:8px;z-index:150}.toast{width:min(340px,calc(100vw - 40px));padding:11px 13px;background:#17243a;color:#fff;border-radius:10px;box-shadow:var(--shadow)}.toast.error{background:#8e2f3b}.toast strong{display:block;font-size:12px}.toast p{margin:3px 0 0;font-size:11px;opacity:.82}.hidden{display:none!important}
-@media(max-width:820px){.page{padding:18px 16px 36px}.header{align-items:center}.current{grid-template-columns:1fr}.current-switch{min-width:0;width:100%}.routing-summary{align-items:flex-start;flex-direction:column}.summary-actions{width:100%}.summary-actions .btn{flex:1}.rule-row,.rule-row.regex{grid-template-columns:28px 1fr 34px}.rule-row select:nth-of-type(2),.rule-row.regex .rule-target{grid-column:2}.rule-row.regex .rule-profile{grid-column:2}.drawer{width:100vw}.header-actions .btn span.label{display:none}}
+@media(max-width:820px){.page{padding:18px 16px 36px}.header{align-items:center}.current{grid-template-columns:1fr}.current-switch{min-width:0;width:100%}.routing-summary{align-items:flex-start;flex-direction:column}.summary-actions{width:100%}.summary-actions .btn{flex:1}.rule-row,.rule-row.regex{grid-template-columns:28px 1fr 34px}.rule-row select:nth-of-type(2),.rule-row.regex .rule-target{grid-column:2}.rule-row.regex .rule-profile{grid-column:2}.drawer{width:100vw}}
 </style>
 </head>
 <body>
@@ -52,7 +53,8 @@ button,input,select{font:inherit}button{border:0}button:focus-visible,input:focu
     </div>
     <div class="header-actions">
       <button class="btn secondary icon" data-action="refresh" title="刷新">↻</button>
-      <button class="btn secondary" data-action="open-auto"><span class="label">自动切换</span></button>
+      <button class="btn secondary" data-action="open-settings"><span class="label">设置</span></button>
+      <button class="btn secondary" data-action="open-extras"><span class="label">拓展功能</span></button>
       <button class="btn secondary" data-action="open-connect"><span class="label">连接设置</span></button>
     </div>
   </header>
@@ -85,11 +87,12 @@ button,input,select{font:inherit}button{border:0}button:focus-visible,input:focu
         <button class="btn" data-action="open-create">新增出口</button>
       </div>
     </div>
+    <div id="provisionNotice" class="provision-notice hidden"></div>
     <div class="table-wrap">
       <div id="profilesEmpty" class="empty hidden">尚未创建出口配置。</div>
       <div id="profilesTableWrap" class="table-scroll">
         <table>
-          <thead><tr><th>名称</th><th>状态</th><th>公网 IP</th><th>国家</th><th>延迟</th><th>本地代理</th><th style="width:190px">操作</th></tr></thead>
+          <thead><tr><th>名称</th><th>状态</th><th>质量</th><th>公网 IP</th><th>国家</th><th>延迟</th><th>本地代理</th><th style="width:190px">操作</th></tr></thead>
           <tbody id="profilesBody"></tbody>
         </table>
       </div>
@@ -138,15 +141,42 @@ button,input,select{font:inherit}button{border:0}button:focus-visible,input:focu
   </div>
 </div>
 
-<div id="autoOverlay" class="overlay">
-  <div class="modal">
-    <div class="modal-head"><div><h3>自动切换</h3><p>低频设置默认收起，不占用主页面。</p></div><button class="close" data-action="close-auto">×</button></div>
-    <div class="modal-body auto-grid">
+<div id="settingsOverlay" class="overlay">
+  <div class="modal wide">
+    <div class="modal-head"><div><h3>设置</h3><p>按功能分类收纳，新增设置在此追加。</p></div><button class="close" data-action="close-settings">×</button></div>
+    <div class="tabs"><button class="tab active" data-settings-tab="auto">自动切换</button><button class="tab" data-settings-tab="cleanup">出口清理</button></div>
+    <div id="settingsAuto" class="modal-body auto-grid">
       <div class="setting"><div class="setting-row"><div><strong>定时轮换</strong><p>按固定间隔更换全局出口。</p></div><label class="toggle"><input id="autoEnabled" type="checkbox"><span></span></label></div><div class="field"><label>间隔（分钟）</label><input id="autoInterval" class="input" type="number" min="0" step="1"></div></div>
       <div class="setting"><div class="setting-row"><div><strong>异常故障转移</strong><p>当前出口检测失败时自动选择其他健康出口。</p></div><label class="toggle"><input id="autoFailover" type="checkbox"><span></span></label></div></div>
       <div class="setting"><div class="setting-row"><div><strong>要求不同公网 IP</strong><p>跳过与当前出口公网 IP 相同的候选配置。</p></div><label class="toggle"><input id="autoDifferent" type="checkbox"><span></span></label></div></div>
     </div>
-    <div class="modal-foot"><button class="btn secondary" data-action="run-auto">立即执行一次</button><button id="saveAutoButton" class="btn" data-action="save-auto">保存</button></div>
+    <div id="settingsCleanup" class="modal-body auto-grid hidden">
+      <div class="setting"><div class="setting-row"><div><strong>自动清理不健康出口</strong><p>连通检测失败（不健康）且未被任何规则引用的托管出口自动删除，防止异常出口堆积占满出口池。通用功能，与拓展功能中的 xAI 降智守护相互独立。</p></div><label class="toggle"><input id="cleanupUnhealthy" type="checkbox"><span></span></label></div>
+        <div class="field"><label>持续异常时长（分钟，0 立即清理）</label><input id="cleanupUnhealthyMinutes" class="input" type="number" min="0" step="1"></div>
+        <div class="setting-row" style="margin-top:10px"><span style="font-size:11px;color:var(--muted)">新创建的出口有 10 分钟保护期，不会被立即清理</span><button class="btn secondary small" data-action="cleanup-run">立即清理</button></div></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" data-action="run-auto">立即执行一次切换</button><button id="saveSettingsButton" class="btn" data-action="save-settings">保存</button></div>
+  </div>
+</div>
+
+<div id="extrasOverlay" class="overlay">
+  <div class="modal wide">
+    <div class="modal-head"><div><h3>拓展功能</h3><p>按功能标签页收纳，后续新增能力在此追加。</p></div><button class="close" data-action="close-extras">×</button></div>
+    <div class="tabs"><button class="tab active" data-extra-tab="quality">xAI 降智守护</button></div>
+    <div id="extrasQuality" class="modal-body auto-grid">
+      <div class="setting"><div class="setting-row"><div><strong>xAI 降智守护</strong><p>仅针对 xAI / Grok 模型输出（共享出口被打穿时输出 token/s 异常飙升）。只影响 XAI 认证文件，与其他 provider 的认证文件配置、分流规则无关。开启后所有 XAI 认证文件自动绑定健康托管出口参与检测，关闭自动解绑；被标记出口自动从分流移除，当前全局出口被标记时自动切换。</p></div><label class="toggle"><input id="qualityEnabled" type="checkbox"><span></span></label></div>
+        <div class="field"><label>降智阈值（输出 token/秒，高于视为异常）</label><input id="qualitySoftTPS" class="input" type="number" min="1" step="10"></div>
+        <div class="field"><label>连续次数判定降智</label><input id="qualityConsecutive" class="input" type="number" min="1" step="1"></div>
+        <div class="field"><label>连续健康次数恢复</label><input id="qualityRecovery" class="input" type="number" min="1" step="1"></div></div>
+      <div class="setting"><div class="setting-row"><div><strong>自动补充出口</strong><p>健康且未降智的托管出口不足时自动注册新 WARP 出口（经现有健康出口注册，带冷却防限流）。</p></div><label class="toggle"><input id="qualityProvision" type="checkbox"><span></span></label></div>
+        <div class="field"><label>最低健康出口数</label><input id="qualityMinHealthy" class="input" type="number" min="1" step="1"></div>
+        <div class="field"><label>出口数量上限（防无限注册）</label><input id="qualityMaxProfiles" class="input" type="number" min="1" step="1"></div></div>
+      <div class="setting"><div class="setting-row"><div><strong>自动清理降智代理</strong><p>删除所有被打上降智标记的托管出口（全部清理，不受数量限制）；配合自动补充形成「降智即清、清后即补」。被规则引用的出口不自动删除。</p></div><label class="toggle"><input id="qualityPrune" type="checkbox"><span></span></label></div>
+        <div class="setting-row" style="margin-top:10px"><span style="font-size:11px;color:var(--muted)">立即按当前规则执行一次清理</span><button class="btn secondary small" data-action="quality-prune">立即清理</button></div></div>
+      <div class="setting"><div class="setting-row"><div><strong>主动质量探测（xAI）</strong><p>新出口创建后复用 CPA 内 xAI 账号经该出口实测输出 TPS；降智的出口立即打记号不参与路由。无需额外 API Key。</p></div><label class="toggle"><input id="qualityProbe" type="checkbox"><span></span></label></div>
+        <div class="field"><label>xAI 模型（如 grok-4）</label><input id="qualityProbeModel" class="input" placeholder="grok-4"></div></div>
+    </div>
+    <div class="modal-foot"><button class="btn secondary" data-action="close-extras">关闭</button><button id="saveExtrasButton" class="btn" data-action="save-extras">保存</button></div>
   </div>
 </div>
 
@@ -196,7 +226,7 @@ button,input,select{font:inherit}button{border:0}button:focus-visible,input:focu
 <script>
 (function(){
 'use strict';
-var state={status:null,profiles:[],rules:emptyRules(),savedRules:emptyRules(),auto:{enabled:false,failover_enabled:true,rotate_interval_seconds:0,require_different_ip:true},files:[],connected:false,confirmResolve:null,authLoaded:false,page:{profiles:1,auth:1},pageSize:{profiles:8,auth:15},demo:new URLSearchParams(location.search).get('demo')==='1'};
+var state={status:null,profiles:[],rules:emptyRules(),savedRules:emptyRules(),auto:{enabled:false,failover_enabled:true,require_different_ip:true},quality:null,settings:null,files:[],connected:false,confirmResolve:null,authLoaded:false,page:{profiles:1,auth:1},pageSize:{profiles:8,auth:15},demo:new URLSearchParams(location.search).get('demo')==='1'};
 function el(id){return document.getElementById(id)}
 function emptyRules(){return {global_profile_id:'',type_rules:[],regex_rules:[],exact_rules:{}}}
 function clone(v){return JSON.parse(JSON.stringify(v))}
@@ -218,6 +248,13 @@ function typeKeyOptions(selected){
   return html;
 }
 function healthBadge(p){if(!p)return '<span class="badge outline">未选择</span>';return p.healthy?'<span class="badge blue">健康</span>':'<span class="badge red">异常</span>'}
+function probeEnabled(){return !!(state.quality&&state.quality.quality&&state.quality.quality.probe&&state.quality.quality.probe.enabled)}
+function qualityBadge(p){
+  if(!p)return '<span class="badge outline">-</span>';
+  if(p.degraded)return '<span class="badge red" title="'+esc(p.degraded_reason||'')+'">降智</span>';
+  if(p.quality_checked_at)return '<span class="badge blue" title="最近 '+(p.quality_tps!=null?Number(p.quality_tps).toFixed(1)+' token/s':'未测')+'">健康</span>';
+  return '<span class="badge outline">未检测</span>'
+}
 function pageSlice(key,arr){var size=state.pageSize[key];var pages=Math.max(1,Math.ceil(arr.length/size));if(state.page[key]>pages)state.page[key]=pages;if(state.page[key]<1)state.page[key]=1;return {list:arr.slice((state.page[key]-1)*size,state.page[key]*size),pages:pages}}
 function pagerHTML(key,total){var size=state.pageSize[key];var pages=Math.max(1,Math.ceil(total/size));if(state.page[key]>pages)state.page[key]=pages;if(state.page[key]<1)state.page[key]=1;var p=state.page[key];return '<span>共 <strong>'+total+'</strong> 条，第 '+p+' / '+pages+' 页</span><div class="pager-btns"><button class="btn secondary small" data-action="page-'+key+'" data-dir="-1"'+(p<=1?' disabled':'')+'>上一页</button><button class="btn secondary small" data-action="page-'+key+'" data-dir="1"'+(p>=pages?' disabled':'')+'>下一页</button></div>'}
 function routeLabel(type){return {exact:'单文件',regex:'正则',type:'类型',global:'全局',inherit:'继承全局',none:'未分配'}[type]||type||'未分配'}
@@ -233,15 +270,46 @@ async function api(path,method,body){
 }
 async function loadAll(){
   showError('');
-  var result=await Promise.all([api('/status'),api('/rules'),api('/auto')]);
-  state.status=result[0];state.profiles=(state.status&&state.status.profiles)||[];state.rules=normalizeRules(result[1]);state.savedRules=clone(state.rules);state.auto=result[2]||state.auto;state.connected=true;state.page.profiles=1;renderAll();
+  var result=await Promise.all([api('/status'),api('/rules'),api('/auto'),api('/quality'),api('/settings')]);
+  state.status=result[0];state.profiles=(state.status&&state.status.profiles)||[];state.rules=normalizeRules(result[1]);state.savedRules=clone(state.rules);state.auto=result[2]||state.auto;state.quality=result[3]||null;state.settings=(result[4]&&result[4].settings)||{cleanup_unhealthy_enabled:false,cleanup_unhealthy_minutes:10};state.connected=true;state.page.profiles=1;renderAll();
 }
 async function loadAuth(){var result=await api('/auth-files');state.files=(result&&result.files)||[];state.authLoaded=true;renderAuth()}
-function renderAll(){updateConnection();renderCurrent();renderProfiles();renderSummary();renderRules();renderAuto()}
+function renderAll(){updateConnection();renderCurrent();renderProfiles();renderSummary();renderRules();renderAuto();renderQuality();renderProvision();renderCleanup()}
+function renderCleanup(){var s=state.settings||{};el('cleanupUnhealthy').checked=!!s.cleanup_unhealthy_enabled;el('cleanupUnhealthyMinutes').value=s.cleanup_unhealthy_minutes!=null?s.cleanup_unhealthy_minutes:10}
+function renderProvision(){
+  var n=el('provisionNotice');var a=state.status&&state.status.auto_provision;
+  if(!a||!a.enabled){n.classList.add('hidden');return}
+  var text='自动补充出口：健康 <strong>'+a.healthy_managed+'/'+a.min_healthy+'</strong>';
+  if(a.last_error){
+    text+='，上次注册失败：'+esc(a.last_error)+(a.next_attempt_in_seconds>0?('，约 '+Math.ceil(a.next_attempt_in_seconds/60)+' 分钟后重试'):'');
+    n.className='provision-notice';
+  }else if(a.healthy_managed>=a.min_healthy){
+    text+='，已达标';
+    n.className='provision-notice ok';
+  }else if(a.last_attempt_at){
+    text+='，等待下次注册'+(a.next_attempt_in_seconds>0?('（约 '+Math.ceil(a.next_attempt_in_seconds/60)+' 分钟后）'):'');
+    n.className='provision-notice';
+  }else{
+    text+='，将自动注册补足';
+    n.className='provision-notice';
+  }
+  n.innerHTML=text;
+  n.classList.remove('hidden');
+}
 function renderCurrent(){
   var s=state.status||{};var p=s.global_profile||profile(s.global_profile_id);
-  el('currentName').textContent=p?p.name:'未选择';var mainIp=p?(p.exit_ip||''):'';var v4=p?(p.exit_ip_v4||(mainIp&&mainIp.indexOf(':')<0?mainIp:'')):'';var v6=p?(p.exit_ip_v6||(mainIp&&mainIp.indexOf(':')>=0?mainIp:'')):'';el('currentIP').textContent=v4?('IPv4 '+v4):(v6?('IPv6 '+v6):'等待检测');el('currentIPAlt').textContent=(v6&&v4)?('IPv6 '+v6):'';el('currentHealth').outerHTML=healthBadge(p).replace('<span','<span id="currentHealth"');el('currentLocation').textContent='国家 '+coloName(p&&p.colo?p.colo:'-');el('currentLatency').textContent='延迟 '+(p&&p.latency_ms?p.latency_ms+' ms':'-');el('relayURL').textContent=s.global_relay_url||'-';
-  el('globalProfileSelect').innerHTML=options(s.global_profile_id,false);el('switchButton').disabled=!state.profiles.length||el('globalProfileSelect').value===s.global_profile_id;
+  el('currentName').textContent=p?p.name:'不使用代理';
+  var mainIp=p?(p.exit_ip||''):'';var v4=p?(p.exit_ip_v4||(mainIp&&mainIp.indexOf(':')<0?mainIp:'')):'';var v6=p?(p.exit_ip_v6||(mainIp&&mainIp.indexOf(':')>=0?mainIp:'')):'';
+  el('currentIP').textContent=p?((v4?('IPv4 '+v4):(v6?('IPv6 '+v6):'等待检测'))):'-';
+  el('currentIPAlt').textContent=(v6&&v4)?('IPv6 '+v6):'';
+  el('currentHealth').outerHTML=p?healthBadge(p).replace('<span','<span id="currentHealth"'):'<span id="currentHealth" class="badge outline">不使用代理</span>';
+  el('currentLocation').textContent='国家 '+(p&&p.colo?coloName(p.colo):'-');
+  el('currentLatency').textContent='延迟 '+(p&&p.latency_ms?p.latency_ms+' ms':'-');
+  el('relayURL').textContent=s.global_relay_url||'-';
+  var html='<option value="">不使用代理</option>';
+  state.profiles.forEach(function(q){html+='<option value="'+esc(q.id)+'"'+(q.id===s.global_profile_id?' selected':'')+'>'+esc(q.name)+(q.healthy?'':'（异常）')+'</option>'});
+  el('globalProfileSelect').innerHTML=html;
+  el('switchButton').disabled=!state.profiles.length||el('globalProfileSelect').value===s.global_profile_id;
 }
 function renderProfiles(){
   var body=el('profilesBody');var empty=!state.profiles.length;el('profilesEmpty').classList.toggle('hidden',!empty);el('profilesTableWrap').classList.toggle('hidden',empty);el('profilesPager').classList.toggle('hidden',empty||state.profiles.length<=state.pageSize.profiles);
@@ -249,8 +317,8 @@ function renderProfiles(){
   var page=pageSlice('profiles',state.profiles);
   el('profilesPager').innerHTML=pagerHTML('profiles',state.profiles.length);
   body.innerHTML=page.list.map(function(p){
-    var current=state.status&&p.id===state.status.global_profile_id;var duplicate=!!(p.exit_ip&&duplicates[p.exit_ip]&&duplicates[p.exit_ip].length>1);var mode=p.mode==='managed'?'托管 WARP':'外部 SOCKS5';
-    return '<tr><td class="name-cell"><strong>'+esc(p.name)+(current?' <span class="badge blue">当前</span>':'')+'</strong><span>'+esc(mode)+'</span></td><td>'+healthBadge(p)+'</td><td class="mono">'+esc(p.exit_ip_v4||(p.exit_ip&&p.exit_ip.indexOf(':')<0?p.exit_ip:'')||'-')+(p.exit_ip_v6||(p.exit_ip&&p.exit_ip.indexOf(':')>=0?p.exit_ip:'')?'<span class="muted"> / '+esc(p.exit_ip_v6||(p.exit_ip&&p.exit_ip.indexOf(':')>=0?p.exit_ip:''))+'</span>':'')+(duplicate?' <span class="badge amber">重复</span>':'')+'</td><td>'+esc(coloName(p.colo)||'-')+'</td><td>'+((p.latency_ms!=null)?p.latency_ms+' ms':'-')+'</td><td class="mono muted">'+esc(p.proxy_url||'-')+'</td><td><div class="actions">'+(current?'':'<button class="btn soft small" data-action="set-global" data-id="'+esc(p.id)+'">设为全局</button>')+'<button class="btn secondary small" data-action="profile-check" data-id="'+esc(p.id)+'">检测</button><div class="menu"><button class="btn secondary small" data-action="toggle-menu">更多</button><div class="menu-pop">'+(p.mode==='managed'?'<button data-action="profile-'+(p.running?'stop':'start')+'" data-id="'+esc(p.id)+'">'+(p.running?'停止':'启动')+'</button><button data-action="profile-recreate" data-id="'+esc(p.id)+'">重新注册</button>':'')+'<button class="danger-text" data-action="profile-delete" data-id="'+esc(p.id)+'">删除</button></div></div></div></td></tr>'
+    var current=state.status&&p.id===state.status.global_profile_id;var duplicate=!!(p.exit_ip&&duplicates[p.exit_ip]&&duplicates[p.exit_ip].length>1);var mode=p.mode==='managed'?'托管 WARP':'外部 SOCKS5';var isAuto=p.origin==='auto'||String(p.name||'').indexOf('自动补充')===0;var originBadge=isAuto?' <span class="badge amber">自动补充</span>':'';
+    return '<tr><td class="name-cell"><strong>'+esc(p.name)+(current?' <span class="badge blue">当前</span>':'')+originBadge+'</strong><span>'+esc(mode)+'</span></td><td>'+healthBadge(p)+'</td><td>'+qualityBadge(p)+'</td><td class="mono">'+esc(p.exit_ip_v4||(p.exit_ip&&p.exit_ip.indexOf(':')<0?p.exit_ip:'')||'-')+(p.exit_ip_v6||(p.exit_ip&&p.exit_ip.indexOf(':')>=0?p.exit_ip:'')?'<span class="muted"> / '+esc(p.exit_ip_v6||(p.exit_ip&&p.exit_ip.indexOf(':')>=0?p.exit_ip:''))+'</span>':'')+(duplicate?' <span class="badge amber">重复</span>':'')+'</td><td>'+esc(coloName(p.colo)||'-')+'</td><td>'+((p.latency_ms!=null)?p.latency_ms+' ms':'-')+'</td><td class="mono muted">'+esc(p.proxy_url||'-')+'</td><td><div class="actions">'+(current?'':'<button class="btn soft small" data-action="set-global" data-id="'+esc(p.id)+'">设为全局</button>')+'<button class="btn secondary small" data-action="profile-check" data-id="'+esc(p.id)+'">检测</button><div class="menu"><button class="btn secondary small" data-action="toggle-menu">更多</button><div class="menu-pop">'+(p.mode==='managed'?'<button data-action="profile-'+(p.running?'stop':'start')+'" data-id="'+esc(p.id)+'">'+(p.running?'停止':'启动')+'</button><button data-action="profile-recreate" data-id="'+esc(p.id)+'">重新注册</button>':'')+(probeEnabled()?'<button data-action="profile-probe" data-id="'+esc(p.id)+'">质量探测</button>':'')+'<button class="danger-text" data-action="profile-delete" data-id="'+esc(p.id)+'">删除</button></div></div></div></td></tr>'
   }).join('')
 }
 function renderSummary(){el('typeRuleCount').textContent='类型规则 '+state.rules.type_rules.length;el('regexRuleCount').textContent='正则规则 '+state.rules.regex_rules.length;el('exactRuleCount').textContent='单文件 '+Object.keys(state.rules.exact_rules||{}).length}
@@ -283,10 +351,27 @@ function renderAuth(){
   el('authBody').innerHTML=page.list.map(function(f){var effective=f.effective||{};var disabled=f.runtime_only?' disabled':'';var selected=(state.rules.exact_rules||{})[f.auth_index]||'';if(!selected&&f.proxy_url&&!isManagedProxy(f.proxy_url))selected='custom:'+f.proxy_url;return '<tr><td class="name-cell"><strong>'+esc(f.name||f.auth_index)+'</strong><span>'+esc(f.email||f.label||f.provider||'')+(f.runtime_only?' · 运行时只读':'')+'</span></td><td><span class="badge outline">'+esc(routeLabel(effective.rule_type))+'</span><div class="route-note">'+esc(effective.rule_key||'')+'</div></td><td><select class="select exact-select" data-auth="'+esc(f.auth_index)+'"'+disabled+'>'+exactOptions(selected,f)+'</select></td></tr>'}).join('')
 }
 function renderAuto(){var a=state.auto||{};el('autoEnabled').checked=!!a.enabled;el('autoFailover').checked=!!a.failover_enabled;el('autoDifferent').checked=!!a.require_different_ip;el('autoInterval').value=Math.round(Number(a.rotate_interval_seconds||0)/60)}
+function renderQuality(){
+  var q=(state.quality&&state.quality.quality)||{};
+  el('qualityEnabled').checked=!!q.enabled;
+  el('qualitySoftTPS').value=q.soft_tps!=null?q.soft_tps:500;
+  el('qualityConsecutive').value=q.consecutive_degraded!=null?q.consecutive_degraded:3;
+  el('qualityRecovery').value=q.recovery_observations!=null?q.recovery_observations:2;
+  el('qualityProvision').checked=!!q.auto_provision;
+  el('qualityMinHealthy').value=q.min_healthy!=null?q.min_healthy:2;
+  el('qualityMaxProfiles').value=q.max_profiles!=null?q.max_profiles:8;
+  el('qualityPrune').checked=!!q.auto_prune;
+  el('qualityProbe').checked=!!(q.probe&&q.probe.enabled);
+  el('qualityProbeModel').value=(q.probe&&q.probe.model)||'';
+}
+function collectQuality(){
+  var probe={enabled:el('qualityProbe').checked,model:el('qualityProbeModel').value.trim()};
+  return {enabled:el('qualityEnabled').checked,soft_tps:Number(el('qualitySoftTPS').value||0),consecutive_degraded:Number(el('qualityConsecutive').value||0),recovery_observations:Number(el('qualityRecovery').value||0),auto_provision:el('qualityProvision').checked,min_healthy:Number(el('qualityMinHealthy').value||0),auto_prune:el('qualityPrune').checked,max_profiles:Number(el('qualityMaxProfiles').value||0),probe:probe};
+}
 async function connect(){var value=el('managementKey').value.trim();if(!value&&!state.demo){toast('缺少密钥','请输入管理密钥','error');return}if(!state.demo)sessionStorage.setItem('warp-egress-key',value);setBusy(el('connectButton'),true,'连接中');try{await loadAll();overlay('connectOverlay',false);toast('连接成功','插件状态已加载')}catch(e){state.connected=false;updateConnection();showError(e.message);toast('连接失败',e.message,'error')}finally{setBusy(el('connectButton'),false)}}
 function disconnect(){if(!state.demo)sessionStorage.removeItem('warp-egress-key');state.connected=false;updateConnection();overlay('connectOverlay',true)}
 async function refresh(){try{await loadAll();toast('已刷新','出口状态已更新')}catch(e){showError(e.message);toast('刷新失败',e.message,'error')}}
-async function switchGlobal(id){var p=profile(id);if(!p)return;setBusy(el('switchButton'),true,'切换中');try{await api('/global/switch','POST',{profile_id:id});await loadAll();toast('已切换',p.name)}catch(e){toast('切换失败',e.message,'error')}finally{setBusy(el('switchButton'),false)}}
+async function switchGlobal(id){var p=profile(id);setBusy(el('switchButton'),true,'切换中');try{await api('/global/switch','POST',{profile_id:id});await loadAll();toast('已切换',p?p.name:'不使用代理')}catch(e){toast('切换失败',e.message,'error')}finally{setBusy(el('switchButton'),false)}}
 function renderCreateVia(){var sel=el('createVia');var current=sel.value;var html='<option value="">直连（默认）</option><option value="__custom__"'+(current==='__custom__'?' selected':'')+'>自定义代理地址…</option>';state.profiles.forEach(function(p){if(p.mode==='managed'&&p.running)html+='<option value="'+esc(p.id)+'"'+(p.id===current?' selected':'')+'>'+esc(p.name)+'（'+esc(p.proxy_url)+'）</option>'});sel.innerHTML=html;el('createViaCustom').classList.toggle('hidden',current!=='__custom__')}
 async function createProfile(){var name=el('createName').value.trim();var mode=el('createMode').value;var proxy=el('createProxy').value.trim();if(!name){toast('缺少名称','请输入出口名称','error');return}if(mode==='external'&&!proxy){toast('缺少代理地址','请输入 SOCKS5 地址','error');return}var via=el('createVia').value;if(via==='__custom__')via=el('createViaCustom').value.trim();setBusy(el('createButton'),true,'创建中');try{await api('/profiles/create','POST',{name:name,mode:mode,proxy_url:proxy,auto_start:el('createAutoStart').checked,register_via:via});overlay('createOverlay',false);el('createName').value='';el('createProxy').value='';el('createViaCustom').value='';await loadAll();toast('出口已创建',name)}catch(e){toast('创建失败',e.message,'error')}finally{setBusy(el('createButton'),false)}}
 async function profileAction(id,action){var p=profile(id);if(!p)return;if(action==='recreate'){var ok=await confirmBox('重新注册出口','将重新生成 '+p.name+' 的 WARP 注册信息，公网 IP 可能变化。','重新注册');if(!ok)return}try{await api('/profiles/action','POST',{id:id,action:action});await loadAll();toast('操作完成',p.name)}catch(e){toast('操作失败',e.message,'error')}}
@@ -295,8 +380,12 @@ async function checkAll(button){if(!state.profiles.length){toast('没有出口',
 async function saveRules(){setBusy(el('saveRulesButton'),true,'保存中');try{state.rules.global_profile_id=el('ruleGlobalProfile').value;var saved=await api('/rules/save','POST',state.rules);state.rules=normalizeRules(saved);state.savedRules=clone(state.rules);renderAll();toast('规则已保存','尚未写入认证文件')}catch(e){toast('保存失败',e.message,'error')}finally{setBusy(el('saveRulesButton'),false)}}
 async function applyRules(){try{var result=await api('/rules/apply','POST',{});toast('应用完成','修改 '+(result.changed||0)+'，失败 '+(result.failed||0),result.failed?'error':undefined);if(state.authLoaded)await loadAuth()}catch(e){toast('应用失败',e.message,'error')}}
 async function assignExact(authIndex,profileID,select){if(select)select.disabled=true;try{await api('/auth-files/assign','POST',{auth_index:authIndex,profile_id:profileID,apply_now:true});state.rules.exact_rules[authIndex]=profileID;if(!profileID)delete state.rules.exact_rules[authIndex];state.savedRules=clone(state.rules);renderSummary();await loadAuth();toast('单文件出口已更新','已立即写入认证文件')}catch(e){toast('设置失败',e.message,'error');await loadAuth()}finally{if(select)select.disabled=false}}
-async function saveAuto(){setBusy(el('saveAutoButton'),true,'保存中');try{state.auto=await api('/auto/save','POST',{enabled:el('autoEnabled').checked,failover_enabled:el('autoFailover').checked,rotate_interval_seconds:Math.max(0,Number(el('autoInterval').value||0))*60,require_different_ip:el('autoDifferent').checked});renderAuto();overlay('autoOverlay',false);toast('自动切换已保存','设置已生效')}catch(e){toast('保存失败',e.message,'error')}finally{setBusy(el('saveAutoButton'),false)}}
+async function saveSettings(){setBusy(el('saveSettingsButton'),true,'保存中');try{state.auto=await api('/auto/save','POST',{enabled:el('autoEnabled').checked,failover_enabled:el('autoFailover').checked,rotate_interval_seconds:Math.max(0,Number(el('autoInterval').value||0))*60,require_different_ip:el('autoDifferent').checked});state.settings=await api('/settings/save','POST',{cleanup_unhealthy_enabled:el('cleanupUnhealthy').checked,cleanup_unhealthy_minutes:Number(el('cleanupUnhealthyMinutes').value||0)});renderAuto();renderCleanup();overlay('settingsOverlay',false);toast('设置已保存','已生效')}catch(e){toast('保存失败',e.message,'error')}finally{setBusy(el('saveSettingsButton'),false)}}
+async function cleanupRun(){setBusy(document.querySelector('[data-action="cleanup-run"]'),true,'清理中');try{await api('/settings/cleanup','POST',{});await loadAll();toast('清理完成','已按当前规则执行')}catch(e){toast('清理失败',e.message,'error')}finally{setBusy(document.querySelector('[data-action="cleanup-run"]'),false)}}
+async function saveExtras(){setBusy(el('saveExtrasButton'),true,'保存中');try{state.quality=await api('/quality/save','POST',collectQuality());renderQuality();overlay('extrasOverlay',false);toast('拓展功能已保存','xAI 降智守护设置已生效')}catch(e){toast('保存失败',e.message,'error')}finally{setBusy(el('saveExtrasButton'),false)}}
 async function runAuto(){try{var result=await api('/auto/run','POST',{});await loadAll();toast('执行完成',result.profile?('已切换到 '+result.profile.name):'当前无需切换')}catch(e){toast('执行失败',e.message,'error')}}
+async function pruneQuality(){setBusy(document.querySelector('[data-action="quality-prune"]'),true,'清理中');try{await api('/quality/prune','POST',{});await loadAll();toast('清理完成','已按当前规则执行')}catch(e){toast('清理失败',e.message,'error')}finally{setBusy(document.querySelector('[data-action="quality-prune"]'),false)}}
+async function profileProbe(id){var p=profile(id);if(!p)return;try{var r=await api('/profiles/probe','POST',{id:id});await loadAll();var healthy=r.classification==='healthy';toast('质量探测完成',healthy?('TPS '+(r.tps||0).toFixed(1)+' token/s'):(r.error||('分类 '+r.classification)),healthy?undefined:'error')}catch(e){toast('质量探测失败',e.message,'error')}}
 function confirmBox(title,text,label){el('confirmTitle').textContent=title;el('confirmText').textContent=text;el('confirmButton').textContent=label||'确认';overlay('confirmOverlay',true);return new Promise(function(resolve){state.confirmResolve=resolve})}
 function resolveConfirm(value){overlay('confirmOverlay',false);if(state.confirmResolve){state.confirmResolve(value);state.confirmResolve=null}}
 function copy(text){if(!text)return;navigator.clipboard.writeText(text).then(function(){toast('已复制',text)}).catch(function(){var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('已复制',text)})}
@@ -305,14 +394,16 @@ function closeMenus(){document.querySelectorAll('.menu.open').forEach(function(m
 function openRouting(){renderRules();overlay('routingOverlay',true);if(!state.authLoaded){loadAuth().then(function(){renderRules()}).catch(function(e){toast('读取失败',e.message,'error')})}}
 function closeRouting(){if(JSON.stringify(state.rules)!==JSON.stringify(state.savedRules)){confirmBox('放弃未保存修改','关闭后将恢复到上次保存的规则。','放弃修改').then(function(ok){if(ok){state.rules=clone(state.savedRules);renderRules();overlay('routingOverlay',false)}})}else{overlay('routingOverlay',false)}}
 function switchTab(name){document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active',t.dataset.tab===name)});el('routingRules').classList.toggle('hidden',name!=='rules');el('routingAuth').classList.toggle('hidden',name!=='auth');if(name==='auth'&&!state.authLoaded){loadAuth().catch(function(e){toast('读取失败',e.message,'error')})}else if(name==='auth')renderAuth()}
-function handle(action,node){var id=node.dataset.id;switch(action){case'refresh':refresh();break;case'open-connect':el('managementKey').value=key();overlay('connectOverlay',true);break;case'close-connect':overlay('connectOverlay',false);break;case'connect':connect();break;case'disconnect':disconnect();break;case'copy-required':copy((state.status&&state.status.required_host_proxy_url)||'');break;case'switch-global':switchGlobal(el('globalProfileSelect').value);break;case'set-global':switchGlobal(id);break;case'open-create':renderCreateVia();overlay('createOverlay',true);break;case'close-create':overlay('createOverlay',false);break;case'create-profile':createProfile();break;case'profile-check':profileAction(id,'check');break;case'profile-start':profileAction(id,'start');break;case'profile-stop':profileAction(id,'stop');break;case'profile-recreate':profileAction(id,'recreate');break;case'profile-delete':deleteProfile(id);break;case'toggle-menu':closeMenus();var menu=node.parentElement;if(!menu.classList.contains('open')){menu.classList.add('open');positionMenu(menu)}break;case'page-profiles':state.page.profiles+=Number(node.dataset.dir);renderProfiles();break;case'page-auth':state.page.auth+=Number(node.dataset.dir);renderAuth();break;case'check-all':checkAll(node);break;case'open-routing':openRouting();break;case'close-routing':closeRouting();break;case'add-type-rule':if(!state.profiles.length){toast('没有出口','请先新增出口','error');break}state.rules.type_rules.push({key:'codex',profile_id:state.profiles[0].id,enabled:true});renderRules();break;case'remove-type-rule':state.rules.type_rules.splice(Number(node.dataset.index),1);renderRules();break;case'add-regex-rule':if(!state.profiles.length){toast('没有出口','请先新增出口','error');break}state.rules.regex_rules.push({id:'rule-'+Date.now(),pattern:'',target:'all',profile_id:state.profiles[0].id,enabled:true});renderRules();break;case'remove-regex-rule':state.rules.regex_rules.splice(Number(node.dataset.index),1);renderRules();break;case'save-rules':saveRules();break;case'apply-rules':applyRules();break;case'open-auto':renderAuto();overlay('autoOverlay',true);break;case'close-auto':overlay('autoOverlay',false);break;case'save-auto':saveAuto();break;case'run-auto':runAuto();break;case'confirm-ok':resolveConfirm(true);break;case'confirm-cancel':resolveConfirm(false);break}}
-document.addEventListener('click',function(e){var tab=e.target.closest('[data-tab]');if(tab){switchTab(tab.dataset.tab);return}var action=e.target.closest('[data-action]');if(action){handle(action.dataset.action,action);return}if(!e.target.closest('.menu'))document.querySelectorAll('.menu.open').forEach(function(m){m.classList.remove('open')})});
+function switchExtraTab(name){document.querySelectorAll('[data-extra-tab]').forEach(function(t){t.classList.toggle('active',t.dataset.extraTab===name)});el('extrasQuality').classList.toggle('hidden',name!=='quality');if(name==='quality')renderQuality()}
+function switchSettingsTab(name){document.querySelectorAll('[data-settings-tab]').forEach(function(t){t.classList.toggle('active',t.dataset.settingsTab===name)});el('settingsAuto').classList.toggle('hidden',name!=='auto');el('settingsCleanup').classList.toggle('hidden',name!=='cleanup');if(name==='auto')renderAuto();if(name==='cleanup')renderCleanup()}
+function handle(action,node){var id=node.dataset.id;switch(action){case'refresh':refresh();break;case'open-connect':el('managementKey').value=key();overlay('connectOverlay',true);break;case'close-connect':overlay('connectOverlay',false);break;case'connect':connect();break;case'disconnect':disconnect();break;case'copy-required':copy((state.status&&state.status.required_host_proxy_url)||'');break;case'switch-global':switchGlobal(el('globalProfileSelect').value);break;case'set-global':switchGlobal(id);break;case'open-create':renderCreateVia();overlay('createOverlay',true);break;case'close-create':overlay('createOverlay',false);break;case'create-profile':createProfile();break;case'profile-check':profileAction(id,'check');break;case'profile-start':profileAction(id,'start');break;case'profile-stop':profileAction(id,'stop');break;case'profile-recreate':profileAction(id,'recreate');break;case'profile-delete':deleteProfile(id);break;case'profile-probe':profileProbe(id);break;case'quality-prune':pruneQuality();break;case'toggle-menu':closeMenus();var menu=node.parentElement;if(!menu.classList.contains('open')){menu.classList.add('open');positionMenu(menu)}break;case'page-profiles':state.page.profiles+=Number(node.dataset.dir);renderProfiles();break;case'page-auth':state.page.auth+=Number(node.dataset.dir);renderAuth();break;case'check-all':checkAll(node);break;case'open-routing':openRouting();break;case'close-routing':closeRouting();break;case'add-type-rule':if(!state.profiles.length){toast('没有出口','请先新增出口','error');break}state.rules.type_rules.push({key:'codex',profile_id:state.profiles[0].id,enabled:true});renderRules();break;case'remove-type-rule':state.rules.type_rules.splice(Number(node.dataset.index),1);renderRules();break;case'add-regex-rule':if(!state.profiles.length){toast('没有出口','请先新增出口','error');break}state.rules.regex_rules.push({id:'rule-'+Date.now(),pattern:'',target:'all',profile_id:state.profiles[0].id,enabled:true});renderRules();break;case'remove-regex-rule':state.rules.regex_rules.splice(Number(node.dataset.index),1);renderRules();break;case'save-rules':saveRules();break;case'apply-rules':applyRules();break;case'open-settings':switchSettingsTab('auto');overlay('settingsOverlay',true);break;case'close-settings':overlay('settingsOverlay',false);break;case'save-settings':saveSettings();break;case'cleanup-run':cleanupRun();break;case'run-auto':runAuto();break;case'open-extras':switchExtraTab('quality');overlay('extrasOverlay',true);break;case'close-extras':overlay('extrasOverlay',false);break;case'save-extras':saveExtras();break;case'confirm-ok':resolveConfirm(true);break;case'confirm-cancel':resolveConfirm(false);break}}
+document.addEventListener('click',function(e){var st=e.target.closest('[data-settings-tab]');if(st){switchSettingsTab(st.dataset.settingsTab);return}var et=e.target.closest('[data-extra-tab]');if(et){switchExtraTab(et.dataset.extraTab);return}var tab=e.target.closest('[data-tab]');if(tab){switchTab(tab.dataset.tab);return}var action=e.target.closest('[data-action]');if(action){handle(action.dataset.action,action);return}if(!e.target.closest('.menu'))document.querySelectorAll('.menu.open').forEach(function(m){m.classList.remove('open')})});
 document.addEventListener('change',function(e){if(e.target.id==='globalProfileSelect')el('switchButton').disabled=e.target.value===(state.status&&state.status.global_profile_id);if(e.target.id==='createMode'){el('externalField').classList.toggle('hidden',e.target.value!=='external');el('viaField').classList.toggle('hidden',e.target.value!=='managed')}if(e.target.id==='createVia'){el('createViaCustom').classList.toggle('hidden',e.target.value!=='__custom__')}if(e.target.id==='ruleGlobalProfile'){state.rules.global_profile_id=e.target.value;updateDirty()}if(e.target.dataset.kind){var arr=e.target.dataset.kind==='type'?state.rules.type_rules:state.rules.regex_rules;var row=arr[Number(e.target.dataset.index)];if(row){row[e.target.dataset.field]=e.target.type==='checkbox'?e.target.checked:e.target.value;updateDirty()}}if(e.target.classList.contains('exact-select'))assignExact(e.target.dataset.auth,e.target.value,e.target);if(e.target.id==='authProviderFilter'){state.page.auth=1;renderAuth()}});
 document.addEventListener('input',function(e){if(e.target.id==='authSearch'){state.page.auth=1;renderAuth()}if(e.target.dataset.kind){var arr=e.target.dataset.kind==='type'?state.rules.type_rules:state.rules.regex_rules;var row=arr[Number(e.target.dataset.index)];if(row){row[e.target.dataset.field]=e.target.value;updateDirty()}}});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){if(el('confirmOverlay').classList.contains('show'))resolveConfirm(false);else if(el('routingOverlay').classList.contains('show'))closeRouting();else document.querySelectorAll('.overlay.show').forEach(function(o){o.classList.remove('show')})}if(e.key==='Enter'&&el('connectOverlay').classList.contains('show'))connect()});
 window.addEventListener('scroll',closeMenus,{passive:true});window.addEventListener('resize',closeMenus);
 function coloName(c){var m={SIN:'新加坡',NRT:'日本',KIX:'日本',HKG:'中国香港',TPE:'中国台湾',ICN:'韩国',BKK:'泰国',KUL:'马来西亚',SGN:'越南',MNL:'菲律宾',CGK:'印度尼西亚',LAX:'美国',SJC:'美国',SEA:'美国',PDX:'美国',SFO:'美国',DFW:'美国',AUS:'美国',DEN:'美国',ORD:'美国',MIA:'美国',ATL:'美国',IAD:'美国',EWR:'美国',BOS:'美国',PHX:'美国',LAS:'美国',MSP:'美国',YVR:'加拿大',YYZ:'加拿大',YUL:'加拿大',GRU:'巴西',EZE:'阿根廷',SCL:'智利',LIM:'秘鲁',BOG:'哥伦比亚',MEX:'墨西哥',AMS:'荷兰',FRA:'德国',LHR:'英国',MAN:'英国',CDG:'法国',PAR:'法国',MAD:'西班牙',BCN:'西班牙',MXP:'意大利',ZRH:'瑞士',ARN:'瑞典',OSL:'挪威',CPH:'丹麦',HEL:'芬兰',WAW:'波兰',PRG:'捷克',VIE:'奥地利',BUD:'匈牙利',ATH:'希腊',IST:'土耳其',SOF:'保加利亚',DXB:'阿联酋',TLV:'以色列',JNB:'南非',CPT:'南非',LOS:'尼日利亚',NBO:'肯尼亚',CAI:'埃及',BOM:'印度',DEL:'印度',BLR:'印度',MAA:'印度',KHI:'巴基斯坦',DAC:'孟加拉',CMB:'斯里兰卡',SYD:'澳大利亚',MEL:'澳大利亚',BNE:'澳大利亚',PER:'澳大利亚',AKL:'新西兰'};return m[c]||c;}
-function demoSeed(){state.status={version:'0.3.0',global_relay_url:'socks5://127.0.0.1:40000',required_host_proxy_url:'socks5://127.0.0.1:40000',global_profile_id:'sin-main',global_relay_running:true,duplicate_exit_ips:{},profiles:[{id:'sin-main',name:'新加坡主出口',mode:'managed',proxy_url:'socks5://127.0.0.1:41000',running:true,healthy:true,exit_ip:'2a09:bac1:6540:8::',exit_ip_v4:'104.28.210.10',exit_ip_v6:'2a09:bac1:6540:8::',colo:'SIN',latency_ms:28,last_checked:new Date().toISOString()},{id:'nrt-backup',name:'东京备用出口',mode:'managed',proxy_url:'socks5://127.0.0.1:41001',running:true,healthy:true,exit_ip:'104.28.210.12',exit_ip_v4:'104.28.210.12',exit_ip_v6:'2a09:bac0:1:2::',colo:'NRT',latency_ms:61,last_checked:new Date().toISOString()}]};state.status.global_profile=state.status.profiles[0];state.profiles=state.status.profiles;state.rules={global_profile_id:'sin-main',type_rules:[{key:'codex',profile_id:'nrt-backup',enabled:true}],regex_rules:[],exact_rules:{}};state.savedRules=clone(state.rules);state.auto={enabled:false,failover_enabled:true,rotate_interval_seconds:0,require_different_ip:true};state.connected=true;renderAll()}
+function demoSeed(){state.status={version:'0.3.0',global_relay_url:'socks5://127.0.0.1:40000',required_host_proxy_url:'socks5://127.0.0.1:40000',global_profile_id:'sin-main',global_relay_running:true,duplicate_exit_ips:{},profiles:[{id:'sin-main',name:'新加坡主出口',mode:'managed',proxy_url:'socks5://127.0.0.1:41000',running:true,healthy:true,exit_ip:'2a09:bac1:6540:8::',exit_ip_v4:'104.28.210.10',exit_ip_v6:'2a09:bac1:6540:8::',colo:'SIN',latency_ms:28,last_checked:new Date().toISOString()},{id:'nrt-backup',name:'东京备用出口',mode:'managed',proxy_url:'socks5://127.0.0.1:41001',running:true,healthy:true,exit_ip:'104.28.210.12',exit_ip_v4:'104.28.210.12',exit_ip_v6:'2a09:bac0:1:2::',colo:'NRT',latency_ms:61,last_checked:new Date().toISOString()}]};state.status.global_profile=state.status.profiles[0];state.profiles=state.status.profiles;state.rules={global_profile_id:'sin-main',type_rules:[{key:'codex',profile_id:'nrt-backup',enabled:true}],regex_rules:[],exact_rules:{}};state.savedRules=clone(state.rules);state.auto={enabled:false,failover_enabled:true,rotate_interval_seconds:0,require_different_ip:true};state.quality={quality:{enabled:true,soft_tps:500,consecutive_degraded:3,recovery_observations:2,min_healthy:2,max_profiles:8,auto_provision:true,auto_prune:true,probe:{enabled:false,model:''}}};state.settings={cleanup_unhealthy_enabled:false,cleanup_unhealthy_minutes:10};state.connected=true;renderAll()}
 function demoAPI(path,method,body){return new Promise(function(resolve){setTimeout(function(){if(path==='/status')resolve(state.status);else if(path==='/rules')resolve(state.rules);else if(path==='/auto')resolve(state.auto);else if(path==='/auth-files')resolve({files:[{auth_index:'codex-a.json',name:'codex-a.json',provider:'codex',email:'a@example.com',runtime_only:false,effective:{rule_type:'type',profile_id:'nrt-backup',rule_key:'codex'}},{auth_index:'claude-b.json',name:'claude-b.json',provider:'claude',email:'b@example.com',runtime_only:false,effective:{rule_type:'global',profile_id:'sin-main'}}]});else if(path==='/global/switch'){state.status.global_profile_id=body.profile_id;state.status.global_profile=profile(body.profile_id);resolve(state.status)}else if(path==='/rules/save'){state.rules=clone(body);resolve(state.rules)}else if(path==='/auto/save'){state.auto=clone(body);resolve(state.auto)}else resolve({status:'ok',changed:2,failed:0})},180)})}
 if(state.demo){demoSeed()}else{el('managementKey').value=key();updateConnection();if(key()){loadAll().catch(function(e){showError(e.message);overlay('connectOverlay',true)})}else{overlay('connectOverlay',true)}}
 })();

@@ -43,11 +43,15 @@ CLIProxyAPI 全局 proxy-url
 
 ## 界面预览
 
-![主面板：出口拓扑、健康概览、全局切换与出口表格](docs/screenshots/panel-overview.png)
+![主面板：全局出口（含不使用代理）、出口配置（质量列）、自动补充状态条与认证文件分流](docs/screenshots/panel-overview.png)
 
 ![分流规则：默认出口、类型/正则规则与认证文件分流](docs/screenshots/panel-routing.png)
 
-![自动切换：定时轮换、故障转移与不同公网 IP 约束](docs/screenshots/panel-auto.png)
+![设置-自动切换：定时轮换、故障转移与不同公网 IP 约束](docs/screenshots/panel-auto.png)
+
+![设置-出口清理：自动清理不健康（连通失败）出口](docs/screenshots/panel-settings-cleanup.png)
+
+![拓展功能-xAI 降智守护：降智检测阈值、自动补充与清理降智代理](docs/screenshots/panel-extras.png)
 
 ## 安装
 

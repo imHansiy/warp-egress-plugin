@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -197,6 +198,45 @@ func TestSOCKSRelayEndToEnd(t *testing.T) {
 	}
 }
 
+func TestSOCKSRelayFallsBackToDirectWhenNoProfile(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("direct-ok"))
+	}))
+	defer target.Close()
+
+	portListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayAddress := portListener.Addr().String()
+	_ = portListener.Close()
+	// selector 返回错误：没有可用的已选出口。
+	relay := NewSOCKSRelay(relayAddress, func() (string, error) {
+		return "", errors.New("no global WARP profile selected")
+	})
+	if err := relay.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+
+	transport := &http.Transport{DialContext: func(ctx context.Context, _ string, address string) (net.Conn, error) {
+		return dialSOCKS5(ctx, relayAddress, address)
+	}}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	response, err := client.Get(target.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "direct-ok" {
+		t.Fatalf("unexpected response: %s", body)
+	}
+}
+
 func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 	required := []string{
 		"id=\"currentName\"",
@@ -205,7 +245,10 @@ func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 		"id=\"routingOverlay\"",
 		"id=\"routingRules\"",
 		"id=\"routingAuth\"",
-		"data-action=\"open-auto\"",
+		"data-action=\"open-settings\"",
+		"data-action=\"open-extras\"",
+		"id=\"extrasOverlay\"",
+		"id=\"settingsOverlay\"",
 		"id=\"connectOverlay\"",
 	}
 	for _, marker := range required {

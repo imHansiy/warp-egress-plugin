@@ -123,6 +123,39 @@ func handlePluginMethod(method string, request []byte) ([]byte, error) {
 			return nil, err
 		}
 		return okEnvelope(response)
+	case "usage.handle":
+		var record map[string]any
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &record); err != nil {
+				return nil, err
+			}
+		}
+		if err := globalManager.HandleUsage(record); err != nil {
+			return nil, err
+		}
+		return okEnvelope(map[string]any{"recorded": true})
+	case "request.intercept_before":
+		var record map[string]any
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &record); err != nil {
+				return nil, err
+			}
+		}
+		if err := globalManager.HandleRequestBefore(record); err != nil {
+			return nil, err
+		}
+		return okEnvelope(map[string]any{})
+	case "response.intercept_stream_chunk":
+		var record map[string]any
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &record); err != nil {
+				return nil, err
+			}
+		}
+		if err := globalManager.HandleStreamChunk(record); err != nil {
+			return nil, err
+		}
+		return okEnvelope(map[string]any{})
 	default:
 		return errorEnvelope("unknown_method", "unknown method: "+method), nil
 	}

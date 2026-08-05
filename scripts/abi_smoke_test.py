@@ -114,7 +114,18 @@ def main():
         registration = invoke("plugin.register", {"config_yaml": b64(config.encode()), "schema_version": 1})
         assert registration["metadata"]["Name"] == "warp-egress"
         routes = invoke("management.register", {})
-        assert len(routes["routes"]) == 15 and routes["resources"][0]["Path"] == "/panel"
+        # 断言关键路由存在而非硬编码数量（路由随功能增长）。
+        assert routes["resources"][0]["Path"] == "/panel"
+        required_routes = [
+            "/warp-egress/status", "/warp-egress/profiles",
+            "/warp-egress/global/switch", "/warp-egress/rules/apply",
+            "/warp-egress/auto", "/warp-egress/quality",
+            "/warp-egress/quality/save", "/warp-egress/settings",
+            "/warp-egress/settings/save",
+        ]
+        route_paths = [route["Path"] for route in routes["routes"]]
+        for path in required_routes:
+            assert path in route_paths, f"missing management route {path}"
 
         status_code, profile = management("/warp-egress/profiles/create", "POST", {"name": "test-exit", "mode": "external", "proxy_url": "socks5://127.0.0.1:59999", "auto_start": False})
         assert status_code == 201, profile

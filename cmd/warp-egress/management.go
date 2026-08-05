@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func pluginRegistration() registration {
@@ -30,7 +31,7 @@ func pluginRegistration() registration {
 				{Name: "allow-remote-listen", Type: "boolean", Description: "允许 SOCKS5 监听非回环地址；默认关闭。"},
 			},
 		},
-		Capabilities: registrationCapabilities{ManagementAPI: true},
+		Capabilities: registrationCapabilities{ManagementAPI: true, UsagePlugin: true, RequestInterceptor: true, ResponseStreamInterceptor: true},
 	}
 }
 
@@ -53,6 +54,13 @@ func managementRoutes() managementRegistration {
 			{Method: http.MethodGet, Path: "/warp-egress/auto"},
 			{Method: http.MethodPost, Path: "/warp-egress/auto/save"},
 			{Method: http.MethodPost, Path: "/warp-egress/auto/run"},
+			{Method: http.MethodGet, Path: "/warp-egress/quality"},
+			{Method: http.MethodPost, Path: "/warp-egress/quality/save"},
+			{Method: http.MethodPost, Path: "/warp-egress/profiles/probe"},
+			{Method: http.MethodPost, Path: "/warp-egress/quality/prune"},
+			{Method: http.MethodGet, Path: "/warp-egress/settings"},
+			{Method: http.MethodPost, Path: "/warp-egress/settings/save"},
+			{Method: http.MethodPost, Path: "/warp-egress/settings/cleanup"},
 		},
 	}
 }
@@ -190,6 +198,82 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
 		}
 		return jsonResponse(http.StatusOK, map[string]any{"profile": profile, "auto_switch": m.stateStore().AutoSwitch()}), nil
+	case "GET /warp-egress/quality":
+		store := m.stateStore()
+		profiles := store.Profiles()
+		healthy, degraded := 0, 0
+		for _, p := range profiles {
+			if p.Healthy {
+				healthy++
+			}
+			if p.Degraded {
+				degraded++
+			}
+		}
+		return jsonResponse(http.StatusOK, map[string]any{
+			"quality": store.Quality(),
+			"summary": map[string]int{"total": len(profiles), "healthy": healthy, "degraded": degraded},
+		}), nil
+	case "POST /warp-egress/quality/save":
+		var body QualityConfig
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		oldQuality := m.stateStore().Quality()
+		if err := m.stateStore().SetQuality(body); err != nil {
+			return managementResponse{}, err
+		}
+		saved := m.stateStore().Quality()
+		// xAI 降智守护开关变化后立即同步 XAI 认证文件的自动绑定/解绑。
+		go func() {
+			m.mu.Lock()
+			m.lastAutoBindSync = time.Time{}
+			m.mu.Unlock()
+			m.syncAutoBoundAuths()
+		}()
+		// 自动补充首次开启（false→true）或补充配置变化时立即判断数量并补充，
+		// 不必等待周期任务与冷却。
+		if saved.AutoProvision && (!oldQuality.AutoProvision ||
+			oldQuality.MinHealthy != saved.MinHealthy ||
+			oldQuality.MaxProfiles != saved.MaxProfiles) {
+			go func() {
+				m.mu.Lock()
+				m.lastProvisionAt = time.Time{}
+				m.mu.Unlock()
+				m.evaluateQualityTasks()
+			}()
+		}
+		return jsonResponse(http.StatusOK, saved), nil
+	case "POST /warp-egress/profiles/probe":
+		var body profileActionRequest
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		result, err := m.ProbeProfile(body.ID)
+		if err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		return jsonResponse(http.StatusOK, result), nil
+	case "POST /warp-egress/quality/prune":
+		m.evaluateQualityTasks()
+		return jsonResponse(http.StatusOK, m.stateStore().Quality()), nil
+	case "GET /warp-egress/settings":
+		return jsonResponse(http.StatusOK, map[string]any{
+			"settings": m.stateStore().Settings(),
+			"auto":     m.stateStore().AutoSwitch(),
+		}), nil
+	case "POST /warp-egress/settings/save":
+		var body SettingsConfig
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		if err := m.stateStore().SetSettings(body); err != nil {
+			return managementResponse{}, err
+		}
+		return jsonResponse(http.StatusOK, m.stateStore().Settings()), nil
+	case "POST /warp-egress/settings/cleanup":
+		m.cleanupUnhealthy()
+		return jsonResponse(http.StatusOK, map[string]any{"ok": true}), nil
 	default:
 		return jsonResponse(http.StatusNotFound, map[string]any{"error": "route not found", "method": method, "path": path}), nil
 	}
