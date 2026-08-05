@@ -67,10 +67,10 @@ CLIProxyAPI 全局 proxy-url
 
 CPA 管理面板内置插件商店，一键下载、校验并启用：
 
-1. **发布 Release 资产**（首次需要；商店安装依赖 GitHub Release 上的 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，打标签后 CI 自动构建全部平台）：
+1. **发布 Release 资产**（首次需要；商店安装依赖 GitHub Release 上的 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，打标签后 CI 自动构建全部平台；把下面的 `vX.Y.Z` 替换为要发布的版本号，例如当前最新 `v0.3.0`）：
 
    ```bash
-   git tag v0.3.2 && git push origin v0.3.2
+   git tag vX.Y.Z && git push origin vX.Y.Z
    ```
 
 2. **添加商店源**：在 `config.yaml` 的 `plugins` 下追加：
