@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// 自动绑定：质量守护（检测降智）开启后，默认检测所有 XAI / Grok 认证文件。
+// 自动绑定：xAI 降智守护开启后，默认检测所有 XAI / Grok 认证文件。
 // 未绑定出口的 XAI 认证文件自动写入健康托管出口的 proxy_url（与 CPA 面板
-// 分流同一字段，两处完全同步）；质量守护关闭时自动解绑，恢复"跟随全局"
+// 分流同一字段，两处完全同步）；xAI 降智守护关闭时自动解绑，恢复"跟随全局"
 // （全局"不使用代理"时即直连），不影响其他非 XAI 认证文件。
 // 用户手动绑定的认证文件（proxy_url 已指向出口/自定义代理）不受影响、不记录。
 
@@ -30,8 +30,8 @@ func isXAIEntry(entry hostAuthFileEntry) bool {
 }
 
 // syncAutoBoundAuths 同步自动绑定：
-//   - 质量守护开启：扫描 XAI 认证文件，未绑定出口的写入健康托管出口 proxy_url；
-//   - 质量守护关闭：解绑此前自动绑定的认证文件（清空 proxy_url）。
+//   - xAI 降智守护开启：扫描 XAI 认证文件，未绑定出口的写入健康托管出口 proxy_url；
+//   - xAI 降智守护关闭：解绑此前自动绑定的认证文件（清空 proxy_url）。
 func (m *Manager) syncAutoBoundAuths() error {
 	store := m.stateStore()
 	if store == nil {

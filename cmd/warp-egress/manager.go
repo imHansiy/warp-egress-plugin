@@ -547,7 +547,7 @@ func (m *Manager) EvaluateAutoSwitch(force bool) (*Profile, error) {
 		return nil, errors.New("plugin is not configured")
 	}
 	auto := store.AutoSwitch()
-	// 质量守护开启时，全局出口被标记降智也会执行切换：
+	// xAI 降智守护开启时，全局出口被标记降智也会执行切换：
 	// 降智检测与降智切换是一体的，不需要额外开关。
 	qualityEnabled := store.Quality().Enabled
 	if !auto.Enabled && !force && !qualityEnabled {

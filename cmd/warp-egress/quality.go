@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// 质量守护（Quality Guard）：通用、与供应商无关。
+// xAI 降智守护（Quality Guard）：仅针对 xAI / Grok 输出降智。
 //
 // 原理：共享出口 IP 被打穿时，AI 生成的输出 Token/s 会异常飙升（表现为"模型变笨"）。
 // 插件被动观测 CPA usage 事件（任意 provider 都产生）的输出 token 数与耗时，
@@ -25,6 +25,12 @@ import (
 // 路由分流与自动切换会跳过被标记的出口；标记可通过连续健康观测或主动探测恢复。
 // 可选主动探测：新出口创建后先经该出口向任意 OpenAI 兼容端点发流式请求实测质量，
 // 降智的出口打记号不投入使用，避免轮换时用上没有质量保证的 IP。
+
+// 注意口径：本模块对外称为「xAI 降智守护」，仅针对 xAI / Grok 模型输出的
+// 降智检测（usage/流式观测都只统计 xAI 类请求），只影响 XAI 认证文件与
+// 其承载的出口；与其他 provider 的认证文件配置、分流规则无关。
+// 自动清理 = 清理降智代理（删除所有降智标记的托管出口，全部清理）；
+// max_profiles 仅作为自动补充的停止线。
 
 // computeTPS 计算输出 TPS（token/s）。短回复首 token 时间接近总时长会虚高 TPS，
 // 因此要求一个可配置的最小生成窗口；窗口不足时退化为用总时长计算。
@@ -342,7 +348,7 @@ func (m *Manager) scheduleQualitySave() {
 
 // evaluateDegradedFailover 当前全局出口被打上降智标记时，
 // 立即切换到其他健康出口（异步，不阻塞 usage 热路径）。
-// 降智检测与降智切换一体：质量守护开启即生效，无需额外开关。
+// 降智检测与降智切换一体：xAI 降智守护开启即生效，无需额外开关。
 func (m *Manager) evaluateDegradedFailover(profile *Profile) {
 	if profile == nil || !profile.Degraded {
 		return
@@ -705,7 +711,7 @@ func (m *Manager) finishStreamTrack(requestID string) {
 		return
 	}
 	// 归因：全局出口模式（与被动 usage 的 fallback 一致）；
-	// 全局"不使用代理"时，若质量守护自动绑定了 XAI 认证文件，
+	// 全局"不使用代理"时，若 xAI 降智守护自动绑定了 XAI 认证文件，
 	// 归到自动绑定出口（所有自动绑定指向同一健康托管出口）。
 	profileID := m.stateStore().Rules().GlobalProfileID
 	if profileID == "" {
@@ -1045,13 +1051,20 @@ func (m *Manager) autoPrune(q QualityConfig) {
 			}
 		}
 	}
+	removed := false
 	for _, p := range profiles {
 		if p == nil || p.Mode != ProfileModeManaged || !p.Degraded || referenced[p.ID] {
 			continue
 		}
 		if err := m.DeleteProfile(p.ID); err == nil {
 			m.setLastError("自动清理降智代理: " + p.Name)
+			removed = true
 		}
+	}
+	if removed {
+		// 被清理出口承载的自动绑定认证文件立即改绑到健康出口，
+		// 避免在周期同步前流量打到已删除的端口。
+		_ = m.syncAutoBoundAuths()
 	}
 }
 

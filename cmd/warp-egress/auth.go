@@ -23,7 +23,7 @@ func (m *Manager) resolveRoute(entry hostAuthFileEntry) EffectiveRoute {
 		}
 		return EffectiveRoute{ProfileID: id, RuleType: ruleType, RuleKey: ruleKey, ProxyURL: p.ProxyURL}
 	}
-	// usable 判断出口是否可用：被质量守护标记（降智）的出口不参与分流。
+	// usable 判断出口是否可用：被 xAI 降智守护标记（降智）的出口不参与分流。
 	usable := func(id string) bool {
 		p := store.Profile(id)
 		return p != nil && !p.Degraded && p.ProxyURL != ""
@@ -251,9 +251,9 @@ func (m *Manager) ApplyRules() (ApplyRulesResult, error) {
 	for _, entry := range entries.Files {
 		item := ApplyItemResult{AuthIndex: entry.AuthIndex, Name: entry.Name}
 		if _, auto := autoBound[entry.AuthIndex]; auto {
-			// 质量守护自动绑定的 XAI 认证文件：保留自动绑定出口，不被规则覆盖。
+			// xAI 降智守护自动绑定的 XAI 认证文件：保留自动绑定出口，不被规则覆盖。
 			item.Skipped = true
-			item.Error = "质量守护自动绑定出口，跳过应用"
+			item.Error = "xAI 降智守护自动绑定出口，跳过应用"
 			result.Skipped++
 			result.Items = append(result.Items, item)
 			continue

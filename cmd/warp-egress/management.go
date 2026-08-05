@@ -221,7 +221,7 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			return managementResponse{}, err
 		}
 		saved := m.stateStore().Quality()
-		// 质量守护开关变化后立即同步 XAI 认证文件的自动绑定/解绑。
+		// xAI 降智守护开关变化后立即同步 XAI 认证文件的自动绑定/解绑。
 		go func() {
 			m.mu.Lock()
 			m.lastAutoBindSync = time.Time{}

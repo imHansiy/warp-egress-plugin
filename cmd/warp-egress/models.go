@@ -162,7 +162,7 @@ type Profile struct {
 	LastError   string      `json:"last_error,omitempty"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
-	// 质量守护：出口被观测/探测到输出 TPS 异常（降智）时标记，
+	// xAI 降智守护：出口被观测/探测到输出 TPS 异常（降智）时标记，
 	// 路由分流与自动切换会跳过被标记的出口。
 	Degraded         bool      `json:"degraded,omitempty"`
 	DegradedReason   string    `json:"degraded_reason,omitempty"`
@@ -216,7 +216,7 @@ type QualityProbeConfig struct {
 	TimeoutSeconds int    `json:"timeout_seconds"`
 }
 
-// QualityConfig 质量守护策略（通用、与供应商无关）：
+// QualityConfig xAI 降智守护策略（仅针对 xAI / Grok 输出降智）：
 // 被动观测 CPA usage 事件中的输出 token 数与耗时，估算输出 TPS；
 // TPS 异常高说明出口共享 IP 被打穿（对 AI 生成表现为"降智"），
 // 连续多次则给该出口打降智标记，路由分流自动跳过。
@@ -231,7 +231,6 @@ type QualityConfig struct {
 	AutoPrune             bool               `json:"auto_prune"`
 	MinHealthy            int                `json:"min_healthy"`
 	MaxProfiles           int                `json:"max_profiles"`
-	PruneUnhealthyMinutes int                `json:"prune_unhealthy_minutes"`
 	ProvisionCooldownMin  int                `json:"provision_cooldown_minutes"`
 	Probe                 QualityProbeConfig `json:"probe"`
 }
@@ -248,7 +247,6 @@ func defaultQualityConfig() QualityConfig {
 		AutoPrune:             true,
 		MinHealthy:            2,
 		MaxProfiles:           8,
-		PruneUnhealthyMinutes: 0,
 		ProvisionCooldownMin:  15,
 		Probe: QualityProbeConfig{
 			Model:          "",
@@ -264,8 +262,8 @@ type PersistedState struct {
 	Rules    Rules            `json:"rules"`
 	Auto     AutoSwitchConfig `json:"auto_switch"`
 	Quality  QualityConfig    `json:"quality,omitempty"`
-	// AutoBoundAuths 记录由质量守护自动绑定出口的 XAI 认证文件
-	// （auth_index → profile_id），关闭质量守护时自动解绑恢复原状。
+	// AutoBoundAuths 记录由 xAI 降智守护自动绑定出口的 XAI 认证文件
+	// （auth_index → profile_id），关闭 xAI 降智守护时自动解绑恢复原状。
 	AutoBoundAuths map[string]string `json:"auto_bound_auths,omitempty"`
 }
 

@@ -260,7 +260,7 @@ func TestEvaluateAutoSwitchDegradedFailoverIndependent(t *testing.T) {
 	if err := manager.store.SetGlobalProfile("a"); err != nil {
 		t.Fatal(err)
 	}
-	// 自动切换总开关与故障转移都关闭：仅依赖质量守护（默认开启）。
+	// 自动切换总开关与故障转移都关闭：仅依赖 xAI 降智守护（默认开启）。
 	if err := manager.SaveAutoSwitch(AutoSwitchConfig{}); err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +637,7 @@ func TestAutoBindXAIAuths(t *testing.T) {
 		return nil
 	}
 
-	// 质量守护开启：XAI 未绑定 → 自动绑定第一个健康出口；非 XAI 不动。
+	// xAI 降智守护开启：XAI 未绑定 → 自动绑定第一个健康出口；非 XAI 不动。
 	if err := manager.syncAutoBoundAuths(); err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestAutoBindXAIAuths(t *testing.T) {
 		t.Fatalf("unexpected auto-bound records: %v", bound)
 	}
 
-	// 质量守护关闭：自动解绑。
+	// xAI 降智守护关闭：自动解绑。
 	q := manager.store.Quality()
 	q.Enabled = false
 	if err := manager.store.SetQuality(q); err != nil {
