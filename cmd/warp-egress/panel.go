@@ -232,6 +232,21 @@ function emptyRules(){return {global_profile_id:'',type_rules:[],regex_rules:[],
 function clone(v){return JSON.parse(JSON.stringify(v))}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function key(){return sessionStorage.getItem('warp-egress-key')||''}
+// cpaRememberedKey 读取 CPA 管理面板「记住密码」保存的管理密钥
+// （localStorage cli-proxy-auth，XOR 混淆可同源解密；算法与管理面板一致）。
+function cpaRememberedKey(){
+  try{
+    var salt='cli-proxy-api-webui::secure-storage';
+    var k=new TextEncoder().encode(salt+'|'+location.host+'|'+navigator.userAgent);
+    function xor(b){var n=new Uint8Array(b.length);for(var r=0;r<b.length;r++)n[r]=b[r]^k[r%k.length];return n}
+    function dec(v){if(!v||v.indexOf('enc::v1::')!==0)return v;var bin=atob(v.slice(9));var bytes=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return new TextDecoder().decode(xor(bytes))}
+    var auth=localStorage.getItem('cli-proxy-auth');
+    if(auth){var parsed=JSON.parse(dec(auth));var st=(parsed&&parsed.state)||{};if(st.managementKey)return String(st.managementKey)}
+    var mk=localStorage.getItem('managementKey');
+    if(mk)return dec(mk)
+  }catch(e){}
+  return ''
+}
 function profile(id){for(var i=0;i<state.profiles.length;i++){if(state.profiles[i].id===id)return state.profiles[i]}return null}
 function normalizeRules(r){r=r||{};return {global_profile_id:r.global_profile_id||'',type_rules:Array.isArray(r.type_rules)?r.type_rules:[],regex_rules:Array.isArray(r.regex_rules)?r.regex_rules:[],exact_rules:r.exact_rules||{}}}
 function setBusy(button,busy,label){if(!button)return;if(busy){button.dataset.old=button.innerHTML;button.disabled=true;button.innerHTML='<span class="spinner"></span>'+(label||'处理中')}else{button.disabled=false;if(button.dataset.old)button.innerHTML=button.dataset.old}}
@@ -417,7 +432,7 @@ window.addEventListener('scroll',closeMenus,{passive:true});window.addEventListe
 function coloName(c){var m={SIN:'新加坡',NRT:'日本',KIX:'日本',HKG:'中国香港',TPE:'中国台湾',ICN:'韩国',BKK:'泰国',KUL:'马来西亚',SGN:'越南',MNL:'菲律宾',CGK:'印度尼西亚',LAX:'美国',SJC:'美国',SEA:'美国',PDX:'美国',SFO:'美国',DFW:'美国',AUS:'美国',DEN:'美国',ORD:'美国',MIA:'美国',ATL:'美国',IAD:'美国',EWR:'美国',BOS:'美国',PHX:'美国',LAS:'美国',MSP:'美国',YVR:'加拿大',YYZ:'加拿大',YUL:'加拿大',GRU:'巴西',EZE:'阿根廷',SCL:'智利',LIM:'秘鲁',BOG:'哥伦比亚',MEX:'墨西哥',AMS:'荷兰',FRA:'德国',LHR:'英国',MAN:'英国',CDG:'法国',PAR:'法国',MAD:'西班牙',BCN:'西班牙',MXP:'意大利',ZRH:'瑞士',ARN:'瑞典',OSL:'挪威',CPH:'丹麦',HEL:'芬兰',WAW:'波兰',PRG:'捷克',VIE:'奥地利',BUD:'匈牙利',ATH:'希腊',IST:'土耳其',SOF:'保加利亚',DXB:'阿联酋',TLV:'以色列',JNB:'南非',CPT:'南非',LOS:'尼日利亚',NBO:'肯尼亚',CAI:'埃及',BOM:'印度',DEL:'印度',BLR:'印度',MAA:'印度',KHI:'巴基斯坦',DAC:'孟加拉',CMB:'斯里兰卡',SYD:'澳大利亚',MEL:'澳大利亚',BNE:'澳大利亚',PER:'澳大利亚',AKL:'新西兰'};return m[c]||c;}
 function demoSeed(){state.status={version:'0.3.0',global_relay_url:'socks5://127.0.0.1:40000',required_host_proxy_url:'socks5://127.0.0.1:40000',global_profile_id:'sin-main',global_relay_running:true,duplicate_exit_ips:{},profiles:[{id:'sin-main',name:'新加坡主出口',mode:'managed',proxy_url:'socks5://127.0.0.1:41000',running:true,healthy:true,exit_ip:'2a09:bac1:6540:8::',exit_ip_v4:'104.28.210.10',exit_ip_v6:'2a09:bac1:6540:8::',colo:'SIN',latency_ms:28,last_checked:new Date().toISOString()},{id:'nrt-backup',name:'东京备用出口',mode:'managed',proxy_url:'socks5://127.0.0.1:41001',running:true,healthy:true,exit_ip:'104.28.210.12',exit_ip_v4:'104.28.210.12',exit_ip_v6:'2a09:bac0:1:2::',colo:'NRT',latency_ms:61,last_checked:new Date().toISOString()}]};state.status.global_profile=state.status.profiles[0];state.profiles=state.status.profiles;state.rules={global_profile_id:'sin-main',type_rules:[{key:'codex',profile_id:'nrt-backup',enabled:true}],regex_rules:[],exact_rules:{}};state.savedRules=clone(state.rules);state.auto={enabled:false,failover_enabled:true,rotate_interval_seconds:0,require_different_ip:true};state.quality={quality:{enabled:true,soft_tps:500,consecutive_degraded:3,recovery_observations:2,min_healthy:2,max_profiles:8,auto_provision:true,auto_prune:true,probe:{enabled:false,model:''}}};state.settings={cleanup_unhealthy_enabled:false,cleanup_unhealthy_minutes:10};state.connected=true;renderAll()}
 function demoAPI(path,method,body){return new Promise(function(resolve){setTimeout(function(){if(path==='/status')resolve(state.status);else if(path==='/rules')resolve(state.rules);else if(path==='/auto')resolve(state.auto);else if(path==='/auth-files')resolve({files:[{auth_index:'codex-a.json',name:'codex-a.json',provider:'codex',email:'a@example.com',runtime_only:false,effective:{rule_type:'type',profile_id:'nrt-backup',rule_key:'codex'}},{auth_index:'claude-b.json',name:'claude-b.json',provider:'claude',email:'b@example.com',runtime_only:false,effective:{rule_type:'global',profile_id:'sin-main'}}]});else if(path==='/global/switch'){state.status.global_profile_id=body.profile_id;state.status.global_profile=profile(body.profile_id);resolve(state.status)}else if(path==='/rules/save'){state.rules=clone(body);resolve(state.rules)}else if(path==='/auto/save'){state.auto=clone(body);resolve(state.auto)}else resolve({status:'ok',changed:2,failed:0})},180)})}
-if(state.demo){demoSeed()}else{el('managementKey').value=key();updateConnection();if(key()){loadAll().catch(function(e){showError(e.message);overlay('connectOverlay',true)})}else{overlay('connectOverlay',true)}}
+if(state.demo){demoSeed()}else{var remembered=key()||cpaRememberedKey();if(remembered){sessionStorage.setItem('warp-egress-key',remembered);el('managementKey').value=remembered;updateConnection();loadAll().catch(function(e){showError(e.message);overlay('connectOverlay',true)})}else{el('managementKey').value='';updateConnection();overlay('connectOverlay',true)}}
 })();
 </script>
 </body>
