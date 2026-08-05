@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func pluginRegistration() registration {
@@ -30,7 +31,7 @@ func pluginRegistration() registration {
 				{Name: "allow-remote-listen", Type: "boolean", Description: "允许 SOCKS5 监听非回环地址；默认关闭。"},
 			},
 		},
-		Capabilities: registrationCapabilities{ManagementAPI: true},
+		Capabilities: registrationCapabilities{ManagementAPI: true, UsagePlugin: true, RequestInterceptor: true, ResponseStreamInterceptor: true},
 	}
 }
 
@@ -53,6 +54,10 @@ func managementRoutes() managementRegistration {
 			{Method: http.MethodGet, Path: "/warp-egress/auto"},
 			{Method: http.MethodPost, Path: "/warp-egress/auto/save"},
 			{Method: http.MethodPost, Path: "/warp-egress/auto/run"},
+			{Method: http.MethodGet, Path: "/warp-egress/quality"},
+			{Method: http.MethodPost, Path: "/warp-egress/quality/save"},
+			{Method: http.MethodPost, Path: "/warp-egress/profiles/probe"},
+			{Method: http.MethodPost, Path: "/warp-egress/quality/prune"},
 		},
 	}
 }
@@ -190,6 +195,51 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
 		}
 		return jsonResponse(http.StatusOK, map[string]any{"profile": profile, "auto_switch": m.stateStore().AutoSwitch()}), nil
+	case "GET /warp-egress/quality":
+		store := m.stateStore()
+		profiles := store.Profiles()
+		healthy, degraded := 0, 0
+		for _, p := range profiles {
+			if p.Healthy {
+				healthy++
+			}
+			if p.Degraded {
+				degraded++
+			}
+		}
+		return jsonResponse(http.StatusOK, map[string]any{
+			"quality": store.Quality(),
+			"summary": map[string]int{"total": len(profiles), "healthy": healthy, "degraded": degraded},
+		}), nil
+	case "POST /warp-egress/quality/save":
+		var body QualityConfig
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		if err := m.stateStore().SetQuality(body); err != nil {
+			return managementResponse{}, err
+		}
+		// 质量守护开关变化后立即同步 XAI 认证文件的自动绑定/解绑。
+		go func() {
+			m.mu.Lock()
+			m.lastAutoBindSync = time.Time{}
+			m.mu.Unlock()
+			m.syncAutoBoundAuths()
+		}()
+		return jsonResponse(http.StatusOK, m.stateStore().Quality()), nil
+	case "POST /warp-egress/profiles/probe":
+		var body profileActionRequest
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		result, err := m.ProbeProfile(body.ID)
+		if err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		return jsonResponse(http.StatusOK, result), nil
+	case "POST /warp-egress/quality/prune":
+		m.evaluateQualityTasks()
+		return jsonResponse(http.StatusOK, m.stateStore().Quality()), nil
 	default:
 		return jsonResponse(http.StatusNotFound, map[string]any{"error": "route not found", "method": method, "path": path}), nil
 	}

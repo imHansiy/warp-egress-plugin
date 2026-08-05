@@ -51,7 +51,10 @@ type pluginMetadata struct {
 }
 
 type registrationCapabilities struct {
-	ManagementAPI bool `json:"management_api"`
+	ManagementAPI             bool `json:"management_api"`
+	UsagePlugin               bool `json:"usage_plugin"`
+	RequestInterceptor        bool `json:"request_interceptor"`
+	ResponseStreamInterceptor bool `json:"response_stream_interceptor"`
 }
 
 type registration struct {
@@ -159,6 +162,17 @@ type Profile struct {
 	LastError   string      `json:"last_error,omitempty"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
+	// 质量守护：出口被观测/探测到输出 TPS 异常（降智）时标记，
+	// 路由分流与自动切换会跳过被标记的出口。
+	Degraded         bool      `json:"degraded,omitempty"`
+	DegradedReason   string    `json:"degraded_reason,omitempty"`
+	DegradedAt       time.Time `json:"degraded_at,omitempty"`
+	QualityTPS       float64   `json:"quality_tps,omitempty"`
+	QualityStrikes   int       `json:"quality_strikes,omitempty"`
+	QualityRecovery  int       `json:"quality_recovery,omitempty"`
+	QualityCheckedAt time.Time `json:"quality_checked_at,omitempty"`
+	// Origin 出口来源：空为手动创建，"auto" 为自动补充创建。
+	Origin string `json:"origin,omitempty"`
 }
 
 type TypeRule struct {
@@ -192,11 +206,67 @@ type AutoSwitchConfig struct {
 	LastReason            string    `json:"last_reason,omitempty"`
 }
 
+// QualityProbeConfig 主动质量探测：新出口/恢复出口先经该出口，复用 CPA 内
+// 的 xAI 账号向 xAI 端点发流式请求，实测输出 TPS。检测对象与降智特征一致
+// （xAI 输出 TPS 异常飙升=共享出口被打穿），无需额外配置 API Key。
+type QualityProbeConfig struct {
+	Enabled        bool   `json:"enabled"`
+	Model          string `json:"model"`
+	MaxTokens      int    `json:"max_tokens"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
+// QualityConfig 质量守护策略（通用、与供应商无关）：
+// 被动观测 CPA usage 事件中的输出 token 数与耗时，估算输出 TPS；
+// TPS 异常高说明出口共享 IP 被打穿（对 AI 生成表现为"降智"），
+// 连续多次则给该出口打降智标记，路由分流自动跳过。
+type QualityConfig struct {
+	Enabled               bool               `json:"enabled"`
+	SoftTPS               float64            `json:"soft_tps"`
+	ConsecutiveDegraded   int                `json:"consecutive_degraded"`
+	RecoveryObservations  int                `json:"recovery_observations"`
+	MinGenerationMs       int64              `json:"min_generation_ms"`
+	MinOutputTokens       int64              `json:"min_output_tokens"`
+	AutoProvision         bool               `json:"auto_provision"`
+	AutoPrune             bool               `json:"auto_prune"`
+	MinHealthy            int                `json:"min_healthy"`
+	MaxProfiles           int                `json:"max_profiles"`
+	PruneUnhealthyMinutes int                `json:"prune_unhealthy_minutes"`
+	ProvisionCooldownMin  int                `json:"provision_cooldown_minutes"`
+	Probe                 QualityProbeConfig `json:"probe"`
+}
+
+func defaultQualityConfig() QualityConfig {
+	return QualityConfig{
+		Enabled:               true,
+		SoftTPS:               500,
+		ConsecutiveDegraded:   3,
+		RecoveryObservations:  2,
+		MinGenerationMs:       1000,
+		MinOutputTokens:       32,
+		AutoProvision:         true,
+		AutoPrune:             true,
+		MinHealthy:            2,
+		MaxProfiles:           8,
+		PruneUnhealthyMinutes: 0,
+		ProvisionCooldownMin:  15,
+		Probe: QualityProbeConfig{
+			Model:          "",
+			MaxTokens:      128,
+			TimeoutSeconds: 60,
+		},
+	}
+}
+
 type PersistedState struct {
 	Version  int              `json:"version"`
 	Profiles []*Profile       `json:"profiles"`
 	Rules    Rules            `json:"rules"`
 	Auto     AutoSwitchConfig `json:"auto_switch"`
+	Quality  QualityConfig    `json:"quality,omitempty"`
+	// AutoBoundAuths 记录由质量守护自动绑定出口的 XAI 认证文件
+	// （auth_index → profile_id），关闭质量守护时自动解绑恢复原状。
+	AutoBoundAuths map[string]string `json:"auto_bound_auths,omitempty"`
 }
 
 type EffectiveRoute struct {
@@ -236,6 +306,7 @@ type createProfileRequest struct {
 	ProxyURL    string `json:"proxy_url,omitempty"`
 	AutoStart   bool   `json:"auto_start"`
 	RegisterVia string `json:"register_via,omitempty"`
+	Origin      string `json:"origin,omitempty"`
 }
 
 type importProfileRequest struct {
@@ -271,16 +342,29 @@ const exactCustomPrefix = "custom:"
 const exactDirect = "direct"
 
 type statusResponse struct {
-	PluginID             string              `json:"plugin_id"`
-	Version              string              `json:"version"`
-	GlobalRelayURL       string              `json:"global_relay_url"`
-	GlobalRelayRunning   bool                `json:"global_relay_running"`
-	GlobalProfileID      string              `json:"global_profile_id,omitempty"`
-	GlobalProfile        *Profile            `json:"global_profile,omitempty"`
-	Profiles             []*Profile          `json:"profiles"`
-	DuplicateExitIPs     map[string][]string `json:"duplicate_exit_ips,omitempty"`
-	DataDir              string              `json:"data_dir"`
-	LastError            string              `json:"last_error,omitempty"`
-	RequiredHostProxyURL string              `json:"required_host_proxy_url"`
-	AutoSwitch           AutoSwitchConfig    `json:"auto_switch"`
+	PluginID             string               `json:"plugin_id"`
+	Version              string               `json:"version"`
+	GlobalRelayURL       string               `json:"global_relay_url"`
+	GlobalRelayRunning   bool                 `json:"global_relay_running"`
+	GlobalProfileID      string               `json:"global_profile_id,omitempty"`
+	GlobalProfile        *Profile             `json:"global_profile,omitempty"`
+	Profiles             []*Profile           `json:"profiles"`
+	DuplicateExitIPs     map[string][]string  `json:"duplicate_exit_ips,omitempty"`
+	DataDir              string               `json:"data_dir"`
+	LastError            string               `json:"last_error,omitempty"`
+	RequiredHostProxyURL string               `json:"required_host_proxy_url"`
+	AutoSwitch           AutoSwitchConfig     `json:"auto_switch"`
+	AutoProvision        *autoProvisionStatus `json:"auto_provision,omitempty"`
+	UsageDiagnostics     UsageDiagnostics     `json:"usage_diagnostics,omitempty"`
+}
+
+// autoProvisionStatus 自动补充出口的当前状态（供面板展示）。
+type autoProvisionStatus struct {
+	Enabled              bool      `json:"enabled"`
+	MinHealthy           int       `json:"min_healthy"`
+	HealthyManaged       int       `json:"healthy_managed"`
+	MaxProfiles          int       `json:"max_profiles"`
+	LastAttemptAt        time.Time `json:"last_attempt_at,omitempty"`
+	LastError            string    `json:"last_error,omitempty"`
+	NextAttemptInSeconds int64     `json:"next_attempt_in_seconds,omitempty"`
 }

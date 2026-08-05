@@ -72,19 +72,22 @@ func (s *SOCKSRelay) handle(client net.Conn) {
 	if err != nil {
 		return
 	}
-	proxyURL, err := s.selector()
-	if err != nil {
-		_ = writeSOCKSReply(client, 0x01, nil)
-		return
-	}
-	proxyAddr, err := socksProxyAddress(proxyURL)
-	if err != nil {
-		_ = writeSOCKSReply(client, 0x01, nil)
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	upstream, err := dialSOCKS5(ctx, proxyAddr, target)
+	proxyURL, err := s.selector()
+	var upstream net.Conn
+	if err != nil {
+		// 没有可用的已选出口（未配置/未选择全局出口）：回退直连。
+		// 否则 CPA 管理请求（配额查询等）会被插件中继阻断。
+		upstream, err = (&net.Dialer{Timeout: 20 * time.Second}).DialContext(ctx, "tcp", target)
+	} else {
+		proxyAddr, addrErr := socksProxyAddress(proxyURL)
+		if addrErr != nil {
+			err = addrErr
+		} else {
+			upstream, err = dialSOCKS5(ctx, proxyAddr, target)
+		}
+	}
 	if err != nil {
 		_ = writeSOCKSReply(client, 0x05, nil)
 		return

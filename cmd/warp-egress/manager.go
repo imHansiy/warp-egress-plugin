@@ -23,6 +23,29 @@ type Manager struct {
 	cancelHealth context.CancelFunc
 	lastError    string
 	configured   bool
+
+	qualitySavePending bool
+	qualityTaskRunning bool
+	lastProvisionAt    time.Time
+	provisionError     string
+	lastAutoBindSync   time.Time
+	// 被动 usage 诊断（供排查降智检测链路）
+	usageEvents       int
+	lastUsageProvider string
+	lastUsageModel    string
+	lastUsageAuth     string
+	lastUsageTokens   int64
+	lastUsageLatency  string
+	// 流式补偿轨道
+	streamMu           sync.Mutex
+	streamTracks       map[string]*streamTrack
+	cancelStream       context.CancelFunc
+	streamBeforeEvents int
+	streamChunkEvents  int
+	streamTrackChars   int
+	streamTrackDone    bool
+	streamChunkIndexes []int
+	streamSample       string
 }
 
 func NewManager() *Manager { return &Manager{processes: map[string]*managedProcess{}} }
@@ -81,6 +104,15 @@ func (m *Manager) Configure(raw []byte) error {
 		}
 	}
 	m.startHealthLoop()
+	m.mu.Lock()
+	if m.cancelStream != nil {
+		m.cancelStream()
+	}
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	m.cancelStream = streamCancel
+	m.streamTracks = map[string]*streamTrack{}
+	m.mu.Unlock()
+	m.startStreamTrackTTLCleanup(streamCtx)
 	return nil
 }
 
@@ -106,6 +138,10 @@ func (m *Manager) Shutdown() {
 	if m.cancelHealth != nil {
 		m.cancelHealth()
 		m.cancelHealth = nil
+	}
+	if m.cancelStream != nil {
+		m.cancelStream()
+		m.cancelStream = nil
 	}
 	relay := m.relay
 	ids := make([]string, 0, len(m.processes))
@@ -144,9 +180,45 @@ func (m *Manager) startHealthLoop() {
 			case <-timer.C:
 				_ = m.CheckAllProfiles()
 				_, _ = m.EvaluateAutoSwitch(false)
+				m.runQualityTasksOnce()
 			}
 		}
 	}()
+}
+
+// runQualityTasksOnce 周期触发自动补充/清理；异步执行且防重入，
+// 避免 wgcf 注册卡住时下一个 tick 再次触发。
+func (m *Manager) runQualityTasksOnce() {
+	m.mu.Lock()
+	if m.qualityTaskRunning {
+		m.mu.Unlock()
+		return
+	}
+	m.qualityTaskRunning = true
+	m.mu.Unlock()
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			m.qualityTaskRunning = false
+			m.mu.Unlock()
+		}()
+		m.evaluateQualityTasks()
+		m.syncAutoBoundAuthsIfDue()
+	}()
+}
+
+// syncAutoBoundAuthsIfDue 自动绑定 XAI 认证文件到健康出口（5 分钟节流）。
+func (m *Manager) syncAutoBoundAuthsIfDue() {
+	m.mu.Lock()
+	due := m.lastAutoBindSync.IsZero() || time.Since(m.lastAutoBindSync) >= 5*time.Minute
+	if due {
+		m.lastAutoBindSync = time.Now()
+	}
+	m.mu.Unlock()
+	if !due {
+		return
+	}
+	_ = m.syncAutoBoundAuths()
 }
 
 func (m *Manager) selectedProfileProxy() (string, error) {
@@ -200,7 +272,78 @@ func (m *Manager) Status() statusResponse {
 		}
 	}
 	response.DuplicateExitIPs = duplicate
+	response.AutoProvision = m.buildAutoProvisionStatus(store.Quality())
+	response.UsageDiagnostics = m.usageDiagnostics()
 	return response
+}
+
+// buildAutoProvisionStatus 汇总自动补充出口的状态：健康托管出口数、
+// 最近一次注册结果与下次重试时间。
+func (m *Manager) buildAutoProvisionStatus(q QualityConfig) *autoProvisionStatus {
+	status := &autoProvisionStatus{Enabled: q.Enabled && q.AutoProvision, MinHealthy: q.MinHealthy, MaxProfiles: q.MaxProfiles}
+	store := m.stateStore()
+	if store == nil {
+		return status
+	}
+	for _, p := range store.Profiles() {
+		if p.Mode == ProfileModeManaged && p.Healthy && !p.Degraded {
+			status.HealthyManaged++
+		}
+	}
+	if status.Enabled {
+		m.mu.RLock()
+		lastAttempt := m.lastProvisionAt
+		lastError := m.provisionError
+		m.mu.RUnlock()
+		status.LastAttemptAt = lastAttempt
+		status.LastError = lastError
+		cooldown := time.Duration(q.ProvisionCooldownMin) * time.Minute
+		if cooldown <= 0 {
+			cooldown = 15 * time.Minute
+		}
+		if !lastAttempt.IsZero() {
+			remaining := cooldown - time.Since(lastAttempt)
+			if remaining > 0 {
+				status.NextAttemptInSeconds = int64(remaining.Seconds())
+			}
+		}
+	}
+	return status
+}
+
+// UsageDiagnostics 被动 usage 事件诊断信息（排查降智检测链路）。
+type UsageDiagnostics struct {
+	Events        int    `json:"events"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	AuthID        string `json:"auth_id,omitempty"`
+	OutputTokens  int64  `json:"output_tokens,omitempty"`
+	Latency       string `json:"latency,omitempty"`
+	StreamBefore  int    `json:"stream_before,omitempty"`
+	StreamChunks  int    `json:"stream_chunks,omitempty"`
+	StreamChars   int    `json:"stream_chars,omitempty"`
+	StreamDone    bool   `json:"stream_done,omitempty"`
+	StreamIndexes []int  `json:"stream_indexes,omitempty"`
+	StreamSample  string `json:"stream_sample,omitempty"`
+}
+
+func (m *Manager) usageDiagnostics() UsageDiagnostics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return UsageDiagnostics{
+		Events:        m.usageEvents,
+		Provider:      m.lastUsageProvider,
+		Model:         m.lastUsageModel,
+		AuthID:        m.lastUsageAuth,
+		OutputTokens:  m.lastUsageTokens,
+		Latency:       m.lastUsageLatency,
+		StreamBefore:  m.streamBeforeEvents,
+		StreamChunks:  m.streamChunkEvents,
+		StreamChars:   m.streamTrackChars,
+		StreamDone:    m.streamTrackDone,
+		StreamIndexes: append([]int(nil), m.streamChunkIndexes...),
+		StreamSample:  m.streamSample,
+	}
 }
 
 func (m *Manager) AllocatePort() (int, error) {
@@ -238,7 +381,7 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 		return nil, errors.New("mode must be managed or external")
 	}
 	now := time.Now()
-	profile := &Profile{ID: newID("warp"), Name: name, Mode: mode, CreatedAt: now, UpdatedAt: now}
+	profile := &Profile{ID: newID("warp"), Name: name, Mode: mode, CreatedAt: now, UpdatedAt: now, Origin: req.Origin}
 	if mode == ProfileModeExternal {
 		proxyURL, err := normalizeSOCKSURL(req.ProxyURL)
 		if err != nil {
@@ -281,7 +424,18 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 		}
 	}
 	_ = m.CheckProfile(profile.ID)
+	m.maybeProbeNewProfile(profile.ID)
 	return m.stateStore().Profile(profile.ID), nil
+}
+
+// maybeProbeNewProfile 新出口创建后，若配置了主动质量探测，
+// 先经该出口实测质量：降智的出口会立即打记号，不参与路由。
+func (m *Manager) maybeProbeNewProfile(id string) {
+	q := m.stateStore().Quality()
+	if !q.Enabled || !q.Probe.Enabled {
+		return
+	}
+	go func() { _, _ = m.ProbeProfile(id) }()
 }
 
 // resolveRegisterProxy 把创建请求里的 register_via 解析为代理地址：
@@ -366,6 +520,7 @@ func (m *Manager) ImportProfile(req importProfileRequest) (*Profile, error) {
 		_ = m.stateStore().UpdateProfile(profile)
 	}
 	_ = m.CheckProfile(profile.ID)
+	m.maybeProbeNewProfile(profile.ID)
 	return m.stateStore().Profile(profile.ID), nil
 }
 
@@ -392,19 +547,31 @@ func (m *Manager) EvaluateAutoSwitch(force bool) (*Profile, error) {
 		return nil, errors.New("plugin is not configured")
 	}
 	auto := store.AutoSwitch()
-	if !auto.Enabled && !force {
+	// 质量守护开启时，全局出口被标记降智也会执行切换：
+	// 降智检测与降智切换是一体的，不需要额外开关。
+	qualityEnabled := store.Quality().Enabled
+	if !auto.Enabled && !force && !qualityEnabled {
 		return nil, nil
 	}
 	rules := store.Rules()
 	current := store.Profile(rules.GlobalProfileID)
 	reason := ""
-	if current == nil || !current.Healthy {
+	if current == nil {
+		if rules.GlobalProfileID == "" {
+			// 用户显式选择"不使用代理"：自动切换不干预。
+			reason = ""
+		} else if auto.FailoverEnabled || force {
+			reason = "failover"
+		}
+	} else if !current.Healthy {
 		if auto.FailoverEnabled || force {
 			reason = "failover"
 		}
+	} else if current.Degraded && qualityEnabled {
+		reason = "degraded"
 	} else if force {
 		reason = "manual-auto"
-	} else if auto.RotateIntervalSeconds > 0 {
+	} else if auto.Enabled && auto.RotateIntervalSeconds > 0 {
 		interval := time.Duration(auto.RotateIntervalSeconds) * time.Second
 		if auto.LastSwitchAt.IsZero() || time.Since(auto.LastSwitchAt) >= interval {
 			reason = "interval"
@@ -427,7 +594,7 @@ func (m *Manager) EvaluateAutoSwitch(force bool) (*Profile, error) {
 	for offset := 1; offset <= len(profiles); offset++ {
 		index := (start + offset + len(profiles)) % len(profiles)
 		candidate := profiles[index]
-		if candidate == nil || !candidate.Healthy || candidate.ID == rules.GlobalProfileID {
+		if candidate == nil || !candidate.Healthy || candidate.Degraded || candidate.ID == rules.GlobalProfileID {
 			continue
 		}
 		if auto.RequireDifferentIP && current != nil && current.ExitIP != "" && candidate.ExitIP == current.ExitIP {

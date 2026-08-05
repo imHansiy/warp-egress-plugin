@@ -23,6 +23,11 @@ func (m *Manager) resolveRoute(entry hostAuthFileEntry) EffectiveRoute {
 		}
 		return EffectiveRoute{ProfileID: id, RuleType: ruleType, RuleKey: ruleKey, ProxyURL: p.ProxyURL}
 	}
+	// usable 判断出口是否可用：被质量守护标记（降智）的出口不参与分流。
+	usable := func(id string) bool {
+		p := store.Profile(id)
+		return p != nil && !p.Degraded && p.ProxyURL != ""
+	}
 	exactKeys := []string{entry.AuthIndex, entry.ID, entry.Name}
 	for _, key := range exactKeys {
 		if key == "" {
@@ -36,11 +41,14 @@ func (m *Manager) resolveRoute(entry hostAuthFileEntry) EffectiveRoute {
 				// 不设置代理：清除 proxy_url，跟随 CPA 全局配置，且不被其他规则接管。
 				return EffectiveRoute{RuleType: "inherit", RuleKey: key}
 			}
-			return profileFor(id, "exact", key)
+			if usable(id) {
+				return profileFor(id, "exact", key)
+			}
+			// 命中出口已降智：跳过该规则，继续按后续优先级匹配。
 		}
 	}
 	for _, rule := range rules.RegexRules {
-		if !rule.Enabled || strings.TrimSpace(rule.Pattern) == "" {
+		if !rule.Enabled || strings.TrimSpace(rule.Pattern) == "" || !usable(rule.ProfileID) {
 			continue
 		}
 		compiled, err := regexp.Compile(rule.Pattern)
@@ -55,7 +63,7 @@ func (m *Manager) resolveRoute(entry hostAuthFileEntry) EffectiveRoute {
 	provider := strings.ToLower(strings.TrimSpace(entry.Provider))
 	authType := strings.ToLower(strings.TrimSpace(entry.Type))
 	for _, rule := range rules.TypeRules {
-		if !rule.Enabled {
+		if !rule.Enabled || !usable(rule.ProfileID) {
 			continue
 		}
 		key := strings.ToLower(strings.TrimSpace(rule.Key))
@@ -64,7 +72,21 @@ func (m *Manager) resolveRoute(entry hostAuthFileEntry) EffectiveRoute {
 		}
 	}
 	if rules.GlobalProfileID != "" {
-		return profileFor(rules.GlobalProfileID, "global", "")
+		global := store.Profile(rules.GlobalProfileID)
+		if global != nil && !global.Degraded {
+			return profileFor(global.ID, "global", "")
+		}
+		// 全局出口被标记降智：回落到第一个健康且未降智的出口，
+		// 保证新请求不会继续打到降智的 IP 上。
+		for _, p := range store.Profiles() {
+			if p.ID == rules.GlobalProfileID {
+				continue
+			}
+			if p.Healthy && !p.Degraded && p.Running && p.ProxyURL != "" {
+				return EffectiveRoute{ProfileID: p.ID, RuleType: "global-fallback", ProxyURL: p.ProxyURL}
+			}
+		}
+		return profileFor(global.ID, "global", "")
 	}
 	return EffectiveRoute{RuleType: "inherit"}
 }
@@ -225,8 +247,17 @@ func (m *Manager) ApplyRules() (ApplyRulesResult, error) {
 		return ApplyRulesResult{}, err
 	}
 	result := ApplyRulesResult{Total: len(entries.Files), Items: make([]ApplyItemResult, 0, len(entries.Files))}
+	autoBound := m.stateStore().AutoBoundAuths()
 	for _, entry := range entries.Files {
 		item := ApplyItemResult{AuthIndex: entry.AuthIndex, Name: entry.Name}
+		if _, auto := autoBound[entry.AuthIndex]; auto {
+			// 质量守护自动绑定的 XAI 认证文件：保留自动绑定出口，不被规则覆盖。
+			item.Skipped = true
+			item.Error = "质量守护自动绑定出口，跳过应用"
+			result.Skipped++
+			result.Items = append(result.Items, item)
+			continue
+		}
 		if entry.RuntimeOnly || entry.AuthIndex == "" || !strings.HasSuffix(strings.ToLower(entry.Name), ".json") {
 			item.Skipped = true
 			item.Error = "runtime-only or no physical JSON auth file"

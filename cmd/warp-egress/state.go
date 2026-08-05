@@ -60,7 +60,10 @@ func (s *StateStore) Save() error {
 }
 
 func cloneState(src PersistedState) PersistedState {
-	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto}
+	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, AutoBoundAuths: map[string]string{}}
+	for key, value := range src.AutoBoundAuths {
+		dst.AutoBoundAuths[key] = value
+	}
 	for _, p := range src.Profiles {
 		dst.Profiles = append(dst.Profiles, cloneProfile(p))
 	}
@@ -128,6 +131,21 @@ func (s *StateStore) UpdateProfile(profile *Profile) error {
 		return errors.New("profile not found")
 	}
 	return s.Save()
+}
+
+// UpdateProfileQuiet 只更新内存中的 profile，不落盘。
+// 用于高频的被动质量观测：观测统计由调用方防抖后统一 Save，
+// 避免每条 usage 事件都全量写 state.json。
+func (s *StateStore) UpdateProfileQuiet(profile *Profile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, existing := range s.state.Profiles {
+		if existing != nil && existing.ID == profile.ID {
+			s.state.Profiles[index] = cloneProfile(profile)
+			return nil
+		}
+	}
+	return errors.New("profile not found")
 }
 
 func (s *StateStore) DeleteProfile(id string) error {
@@ -224,11 +242,79 @@ func (s *StateStore) SetAutoSwitch(config AutoSwitchConfig) error {
 	return s.Save()
 }
 
+func (s *StateStore) SetAutoBoundAuths(bound map[string]string) error {
+	s.mu.Lock()
+	if bound == nil {
+		bound = map[string]string{}
+	}
+	s.state.AutoBoundAuths = bound
+	s.mu.Unlock()
+	return s.Save()
+}
+
+func (s *StateStore) AutoBoundAuths() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := map[string]string{}
+	for key, value := range s.state.AutoBoundAuths {
+		out[key] = value
+	}
+	return out
+}
+
 func (s *StateStore) RecordSwitch(profileID, reason string) error {
 	s.mu.Lock()
 	s.state.Auto.LastSwitchAt = time.Now()
 	s.state.Auto.LastProfileID = profileID
 	s.state.Auto.LastReason = reason
+	s.mu.Unlock()
+	return s.Save()
+}
+
+func (s *StateStore) Quality() QualityConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state.Quality.Enabled == false && s.state.Quality.SoftTPS == 0 && s.state.Quality.ConsecutiveDegraded == 0 {
+		return defaultQualityConfig()
+	}
+	return s.state.Quality
+}
+
+func (s *StateStore) SetQuality(config QualityConfig) error {
+	defaults := defaultQualityConfig()
+	// 只回填显式为零的字段（避免 UI 少传字段时把默认值清掉）。
+	if config.SoftTPS <= 0 {
+		config.SoftTPS = defaults.SoftTPS
+	}
+	if config.ConsecutiveDegraded <= 0 {
+		config.ConsecutiveDegraded = defaults.ConsecutiveDegraded
+	}
+	if config.RecoveryObservations <= 0 {
+		config.RecoveryObservations = defaults.RecoveryObservations
+	}
+	if config.MinGenerationMs <= 0 {
+		config.MinGenerationMs = defaults.MinGenerationMs
+	}
+	if config.MinOutputTokens < 0 {
+		config.MinOutputTokens = defaults.MinOutputTokens
+	}
+	if config.MinHealthy < 1 {
+		config.MinHealthy = defaults.MinHealthy
+	}
+	if config.MaxProfiles < 1 {
+		config.MaxProfiles = defaults.MaxProfiles
+	}
+	if config.ProvisionCooldownMin <= 0 {
+		config.ProvisionCooldownMin = defaults.ProvisionCooldownMin
+	}
+	if config.Probe.MaxTokens <= 0 {
+		config.Probe.MaxTokens = defaults.Probe.MaxTokens
+	}
+	if config.Probe.TimeoutSeconds <= 0 {
+		config.Probe.TimeoutSeconds = defaults.Probe.TimeoutSeconds
+	}
+	s.mu.Lock()
+	s.state.Quality = config
 	s.mu.Unlock()
 	return s.Save()
 }
