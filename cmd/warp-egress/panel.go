@@ -156,17 +156,16 @@ button,input,select{font:inherit}button{border:0}button:focus-visible,input:focu
 <div id="extrasOverlay" class="overlay">
   <div class="modal wide">
     <div class="modal-head"><div><h3>拓展功能</h3><p>按功能标签页收纳，后续新增能力在此追加。</p></div><button class="close" data-action="close-extras">×</button></div>
-    <div class="tabs"><button class="tab active" data-extra-tab="quality">质量守护</button></div>
+    <div class="tabs"><button class="tab active" data-extra-tab="quality">xAI 降智守护</button></div>
     <div id="extrasQuality" class="modal-body auto-grid">
-      <div class="setting"><div class="setting-row"><div><strong>质量守护（xAI 降智检测）</strong><p>仅统计 xAI / Grok 请求的输出 TPS，连续异常给出口打降智标记：分流自动跳过，全局出口被标记时自动切换到健康出口。</p></div><label class="toggle"><input id="qualityEnabled" type="checkbox"><span></span></label></div>
+      <div class="setting"><div class="setting-row"><div><strong>xAI 降智守护</strong><p>仅针对 xAI / Grok 模型输出（共享出口被打穿时输出 token/s 异常飙升）。只影响 XAI 认证文件，与其他 provider 的认证文件配置、分流规则无关。开启后所有 XAI 认证文件自动绑定健康托管出口参与检测，关闭自动解绑；被标记出口自动从分流移除，当前全局出口被标记时自动切换。</p></div><label class="toggle"><input id="qualityEnabled" type="checkbox"><span></span></label></div>
         <div class="field"><label>降智阈值（输出 token/秒，高于视为异常）</label><input id="qualitySoftTPS" class="input" type="number" min="1" step="10"></div>
         <div class="field"><label>连续次数判定降智</label><input id="qualityConsecutive" class="input" type="number" min="1" step="1"></div>
         <div class="field"><label>连续健康次数恢复</label><input id="qualityRecovery" class="input" type="number" min="1" step="1"></div></div>
-      <div class="setting"><div class="setting-row"><div><strong>自动补充出口</strong><p>健康且未降智的出口不足时自动注册新 WARP 出口（经现有健康出口注册，带冷却防限流）。</p></div><label class="toggle"><input id="qualityProvision" type="checkbox"><span></span></label></div>
-        <div class="field"><label>最低健康出口数</label><input id="qualityMinHealthy" class="input" type="number" min="1" step="1"></div></div>
-      <div class="setting"><div class="setting-row"><div><strong>自动清理历史出口</strong><p>超过数量上限或长期异常、且未被任何规则引用的托管出口自动删除，防止历史 IP 堆积。</p></div><label class="toggle"><input id="qualityPrune" type="checkbox"><span></span></label></div>
-        <div class="field"><label>出口数量上限</label><input id="qualityMaxProfiles" class="input" type="number" min="1" step="1"></div>
-        <div class="field"><label>异常清理时长（分钟，0 仅上限清理）</label><input id="qualityPruneMinutes" class="input" type="number" min="0" step="1"></div>
+      <div class="setting"><div class="setting-row"><div><strong>自动补充出口</strong><p>健康且未降智的托管出口不足时自动注册新 WARP 出口（经现有健康出口注册，带冷却防限流）。</p></div><label class="toggle"><input id="qualityProvision" type="checkbox"><span></span></label></div>
+        <div class="field"><label>最低健康出口数</label><input id="qualityMinHealthy" class="input" type="number" min="1" step="1"></div>
+        <div class="field"><label>出口数量上限（防无限注册）</label><input id="qualityMaxProfiles" class="input" type="number" min="1" step="1"></div></div>
+      <div class="setting"><div class="setting-row"><div><strong>自动清理降智代理</strong><p>删除所有被打上降智标记的托管出口（全部清理，不受数量限制）；配合自动补充形成「降智即清、清后即补」。被规则引用的出口不自动删除。</p></div><label class="toggle"><input id="qualityPrune" type="checkbox"><span></span></label></div>
         <div class="setting-row" style="margin-top:10px"><span style="font-size:11px;color:var(--muted)">立即按当前规则执行一次清理</span><button class="btn secondary small" data-action="quality-prune">立即清理</button></div></div>
       <div class="setting"><div class="setting-row"><div><strong>主动质量探测（xAI）</strong><p>新出口创建后复用 CPA 内 xAI 账号经该出口实测输出 TPS；降智的出口立即打记号不参与路由。无需额外 API Key。</p></div><label class="toggle"><input id="qualityProbe" type="checkbox"><span></span></label></div>
         <div class="field"><label>xAI 模型（如 grok-4）</label><input id="qualityProbeModel" class="input" placeholder="grok-4"></div></div>
@@ -353,15 +352,14 @@ function renderQuality(){
   el('qualityRecovery').value=q.recovery_observations!=null?q.recovery_observations:2;
   el('qualityProvision').checked=!!q.auto_provision;
   el('qualityMinHealthy').value=q.min_healthy!=null?q.min_healthy:2;
-  el('qualityPrune').checked=!!q.auto_prune;
   el('qualityMaxProfiles').value=q.max_profiles!=null?q.max_profiles:8;
-  el('qualityPruneMinutes').value=q.prune_unhealthy_minutes!=null?q.prune_unhealthy_minutes:0;
+  el('qualityPrune').checked=!!q.auto_prune;
   el('qualityProbe').checked=!!(q.probe&&q.probe.enabled);
   el('qualityProbeModel').value=(q.probe&&q.probe.model)||'';
 }
 function collectQuality(){
   var probe={enabled:el('qualityProbe').checked,model:el('qualityProbeModel').value.trim()};
-  return {enabled:el('qualityEnabled').checked,soft_tps:Number(el('qualitySoftTPS').value||0),consecutive_degraded:Number(el('qualityConsecutive').value||0),recovery_observations:Number(el('qualityRecovery').value||0),auto_provision:el('qualityProvision').checked,min_healthy:Number(el('qualityMinHealthy').value||0),auto_prune:el('qualityPrune').checked,max_profiles:Number(el('qualityMaxProfiles').value||0),prune_unhealthy_minutes:Number(el('qualityPruneMinutes').value||0),probe:probe};
+  return {enabled:el('qualityEnabled').checked,soft_tps:Number(el('qualitySoftTPS').value||0),consecutive_degraded:Number(el('qualityConsecutive').value||0),recovery_observations:Number(el('qualityRecovery').value||0),auto_provision:el('qualityProvision').checked,min_healthy:Number(el('qualityMinHealthy').value||0),auto_prune:el('qualityPrune').checked,max_profiles:Number(el('qualityMaxProfiles').value||0),probe:probe};
 }
 async function connect(){var value=el('managementKey').value.trim();if(!value&&!state.demo){toast('缺少密钥','请输入管理密钥','error');return}if(!state.demo)sessionStorage.setItem('warp-egress-key',value);setBusy(el('connectButton'),true,'连接中');try{await loadAll();overlay('connectOverlay',false);toast('连接成功','插件状态已加载')}catch(e){state.connected=false;updateConnection();showError(e.message);toast('连接失败',e.message,'error')}finally{setBusy(el('connectButton'),false)}}
 function disconnect(){if(!state.demo)sessionStorage.removeItem('warp-egress-key');state.connected=false;updateConnection();overlay('connectOverlay',true)}

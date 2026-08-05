@@ -356,13 +356,14 @@ func TestEvaluateAutoSwitchRespectsNoProxy(t *testing.T) {
 	}
 }
 
-func TestAutoPruneRemovesOldestUnhealthyUnreferenced(t *testing.T) {
+func TestAutoPruneClearsAllDegraded(t *testing.T) {
 	manager := newTestManager(t)
 	now := time.Now()
 	profiles := []*Profile{
-		{ID: "old", Name: "old", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", CreatedAt: now.Add(-48 * time.Hour)},
-		{ID: "new", Name: "new", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", CreatedAt: now.Add(-1 * time.Hour)},
-		{ID: "global", Name: "global", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41003", CreatedAt: now.Add(-24 * time.Hour)},
+		{ID: "d1", Name: "d1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Degraded: true, CreatedAt: now.Add(-48 * time.Hour)},
+		{ID: "d2", Name: "d2", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, Degraded: true, CreatedAt: now.Add(-1 * time.Hour)},
+		{ID: "ok", Name: "ok", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41003", Healthy: true, CreatedAt: now.Add(-1 * time.Hour)},
+		{ID: "global", Name: "global", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41004", Healthy: true, Degraded: true, CreatedAt: now.Add(-24 * time.Hour)},
 	}
 	for _, p := range profiles {
 		if err := manager.store.AddProfile(p); err != nil {
@@ -373,42 +374,19 @@ func TestAutoPruneRemovesOldestUnhealthyUnreferenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := manager.store.Quality()
-	q.MaxProfiles = 2
-	q.PruneUnhealthyMinutes = 0
-	if err := manager.store.SetQuality(q); err != nil {
-		t.Fatal(err)
-	}
-	manager.autoPrune(q)
-	if got := manager.store.Profile("old"); got != nil {
-		t.Fatalf("oldest unhealthy unreferenced profile must be pruned, still present: %+v", got)
-	}
-	if manager.store.Profile("global") == nil || manager.store.Profile("new") == nil {
-		t.Fatal("referenced and newer profiles must survive pruning")
-	}
-}
-
-func TestAutoPruneUnhealthyTimeout(t *testing.T) {
-	manager := newTestManager(t)
-	now := time.Now()
-	stale := &Profile{ID: "stale", Name: "stale", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", CreatedAt: now.Add(-48 * time.Hour), LastChecked: now.Add(-3 * time.Hour)}
-	recent := &Profile{ID: "recent", Name: "recent", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", CreatedAt: now.Add(-48 * time.Hour), LastChecked: now.Add(-5 * time.Minute)}
-	for _, p := range []*Profile{stale, recent} {
-		if err := manager.store.AddProfile(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	q := manager.store.Quality()
 	q.AutoPrune = true
-	q.PruneUnhealthyMinutes = 60
 	if err := manager.store.SetQuality(q); err != nil {
 		t.Fatal(err)
 	}
 	manager.autoPrune(q)
-	if manager.store.Profile("stale") != nil {
-		t.Fatal("stale unhealthy profile must be pruned")
+	if manager.store.Profile("d1") != nil || manager.store.Profile("d2") != nil {
+		t.Fatal("all degraded egress must be cleared")
 	}
-	if manager.store.Profile("recent") == nil {
-		t.Fatal("recently checked profile must survive")
+	if manager.store.Profile("global") == nil {
+		t.Fatal("degraded egress referenced by rules must not be auto-deleted")
+	}
+	if manager.store.Profile("ok") == nil {
+		t.Fatal("non-degraded egress must survive")
 	}
 }
 
@@ -738,58 +716,6 @@ func TestMinHealthyClampedToMaxProfiles(t *testing.T) {
 	got := manager.store.Quality()
 	if got.MinHealthy != 4 {
 		t.Fatalf("min_healthy must be clamped to max_profiles, got %d", got.MinHealthy)
-	}
-}
-
-func TestAutoPruneRemovesDegradedWhenOverLimit(t *testing.T) {
-	manager := newTestManager(t)
-	now := time.Now()
-	profiles := []*Profile{
-		{ID: "degraded", Name: "degraded", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Degraded: true, CreatedAt: now.Add(-48 * time.Hour)},
-		{ID: "ok1", Name: "ok1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, CreatedAt: now.Add(-24 * time.Hour)},
-		{ID: "ok2", Name: "ok2", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41003", Healthy: true, CreatedAt: now.Add(-1 * time.Hour)},
-	}
-	for _, p := range profiles {
-		if err := manager.store.AddProfile(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	q := manager.store.Quality()
-	q.MaxProfiles = 2
-	q.AutoPrune = true
-	if err := manager.store.SetQuality(q); err != nil {
-		t.Fatal(err)
-	}
-	manager.autoPrune(q)
-	if manager.store.Profile("degraded") != nil {
-		t.Fatal("degraded egress must be pruned first when over limit (consistent with auto-provision's healthy definition)")
-	}
-	if manager.store.Profile("ok1") == nil || manager.store.Profile("ok2") == nil {
-		t.Fatal("healthy egresses must survive pruning")
-	}
-}
-
-func TestAutoPruneKeepsDegradedWhenWithinLimit(t *testing.T) {
-	manager := newTestManager(t)
-	now := time.Now()
-	profiles := []*Profile{
-		{ID: "d1", Name: "d1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Degraded: true, CreatedAt: now.Add(-48 * time.Hour)},
-		{ID: "ok", Name: "ok", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, CreatedAt: now.Add(-1 * time.Hour)},
-	}
-	for _, p := range profiles {
-		if err := manager.store.AddProfile(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	q := manager.store.Quality()
-	q.MaxProfiles = 8
-	q.AutoPrune = true
-	if err := manager.store.SetQuality(q); err != nil {
-		t.Fatal(err)
-	}
-	manager.autoPrune(q)
-	if manager.store.Profile("d1") == nil {
-		t.Fatal("degraded egress within limit must survive (recoverable via healthy observations)")
 	}
 }
 
