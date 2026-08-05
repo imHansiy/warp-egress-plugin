@@ -55,25 +55,16 @@ CLIProxyAPI 全局 proxy-url
 
 ## 安装
 
-支持三种安装路径，按推荐程度排序：
+支持两种安装路径：
 
 | 方式 | 场景 |
 | --- | --- |
-| ① 插件商店一键安装 | 有 GitHub Release 资产（推荐，见下文） |
-| ② 注册源导入 | 服务器 IP 触发注册限流（429）时的首选创建出口方式 |
-| ③ 手动复制 | 离线/内网环境 |
+| ① 插件商店一键安装 | 推荐；需要本插件已发布 Release 资产（见文末「维护者指南」） |
+| ② 手动复制 | 离线/内网环境 |
 
 ### 方式 ①：插件商店安装
 
-CPA 管理面板内置插件商店，一键下载、校验并启用：
-
-1. **发布 Release 资产**（首次需要；商店安装依赖 GitHub Release 上的 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，打标签后 CI 自动构建全部平台；把下面的 `vX.Y.Z` 替换为要发布的版本号，例如当前最新 `v0.3.0`）：
-
-   ```bash
-   git tag vX.Y.Z && git push origin vX.Y.Z
-   ```
-
-2. **添加商店源**：在 `config.yaml` 的 `plugins` 下追加：
+1. **添加商店源**：在 `config.yaml` 的 `plugins` 下追加：
 
    ```yaml
    plugins:
@@ -85,7 +76,7 @@ CPA 管理面板内置插件商店，一键下载、校验并启用：
 
    `store-sources` 追加到内置官方源（`CLIProxyAPI-Plugins-Store`）之后。重启生效。
 
-3. **面板安装**：打开 `http://你的CLIProxyAPI地址:8317/management.html` →「插件商店」→ 找到 **WARP Egress** → 安装。CPA 自动完成：定位 zip → 下载 → `checksums.txt` 校验 SHA256 → 解压到 `plugins/` → 写入 `config.yaml` 启用。
+2. **面板安装**：打开 `http://你的CLIProxyAPI地址:8317/management.html` →「插件商店」→ 找到 **WARP Egress** → 安装。CPA 自动完成：定位 zip → 下载 → `checksums.txt` 校验 SHA256 → 解压到 `plugins/` → 写入 `config.yaml` 启用。
 
 ### 方式 ②：手动复制
 
@@ -234,40 +225,6 @@ POST /v0/management/warp-egress/auto/run
 - `POST /profiles/import`：`{name, wgcf_profile}`，导入 wgcf-profile.conf 内容，不触发注册。
 - `POST /auth-files/assign`：`{auth_index, profile_id | proxy_url, apply_now}`。`profile_id` 为空清除出口；`direct` 表示不设置代理（锁定清除）；`proxy_url` 字段写入任意自定义代理。
 
-## 构建与发布
-
-### 平台支持
-
-| 平台 | 架构 | 插件文件 | 构建方式 |
-| --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `warp-egress.so` | 交叉编译（arm64 需 `gcc-aarch64-linux-gnu`） |
-| Windows | amd64 | `warp-egress.dll` | 交叉编译（需 mingw-w64） |
-| macOS | amd64 / arm64 | `warp-egress.dylib` | 原生构建（macOS 主机，系统 clang） |
-
-CI 打标签（`v*`）自动构建并发布全部平台 zip 资产；`wgcf` / `wireproxy` 按构建平台自动下载对应版本内嵌，无需手工准备。
-
-### 本地构建
-
-```bash
-make test
-make build-linux-amd64                        # Linux x86-64
-make build-linux-arm64                        # Linux arm64（需 gcc-aarch64-linux-gnu）
-make build-windows-amd64                      # Windows x86-64（需 mingw-w64）
-make build-darwin-amd64 / build-darwin-arm64  # macOS（需在 macOS 主机上构建）
-```
-
-发布打包：`make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`），另提供 `release-windows-amd64`、`release-darwin-amd64`、`release-darwin-arm64`。
-
-### Registry 文件
-
-仓库提供三份 Plugin Store schema v1 文件（`registry.json` 双语、`registry.zh-CN.json`、`registry.en.json`）。发布前将三份文件中的 `https://github.com/OWNER/warp-egress` 替换为真实仓库地址并执行：
-
-```bash
-make registry-check
-```
-
-详见 `REGISTRY.md`。
-
 ## 数据目录
 
 ```text
@@ -301,3 +258,55 @@ warp-egress-data/
 - 保持 `remote-management.allow-remote: false`，或在反向代理层增加额外认证。
 - 先备份 CLIProxyAPI 的 `auth-dir`，再首次执行「保存并应用」。
 - 使用系统服务管理 CLIProxyAPI，避免插件被强制终止时留下不完整操作。
+
+---
+
+# 维护者指南
+
+以下内容面向插件维护者（发布流程与构建），最终用户无需阅读。
+
+## 插件商店发布流程
+
+商店安装依赖 GitHub Release 上的 `<插件ID>_<版本>_<平台>_<架构>.zip` + `checksums.txt`，打标签后 CI 自动构建全部平台并发布。每次发版：
+
+1. **同步 registry 版本号**：三份 `registry*.json` 的 `version` 更新为目标版本，并更新 `CHANGELOG.md`，执行 `make registry-check` 校验后提交推送。
+
+2. **打标签发布**（`vX.Y.Z` 替换为目标版本，如 `v0.3.0`）：
+
+   ```bash
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+   CI（Release 工作流）自动：在 glibc 2.31（bullseye）容器内构建 linux/amd64、linux/arm64、windows/amd64 → 打包 zip → 生成 `checksums.txt` → 上传 Release 资产。商店用户即可搜索安装该版本。
+
+## 平台支持
+
+| 平台 | 架构 | 插件文件 | 构建方式 |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | `warp-egress.so` | 交叉编译（arm64 需 `gcc-aarch64-linux-gnu`） |
+| Windows | amd64 | `warp-egress.dll` | 交叉编译（需 mingw-w64） |
+| macOS | amd64 / arm64 | `warp-egress.dylib` | 原生构建（macOS 主机，系统 clang） |
+
+`.so` / `.dll` / `.dylib` 均为原生动态库，须与 CPA 进程同架构、同 libc（Linux 用 bullseye 容器保证 glibc 2.31 可加载）。`wgcf` / `wireproxy` 按构建平台自动下载对应版本内嵌，无需手工准备。
+
+## 本地构建
+
+```bash
+make test
+make build-linux-amd64                        # Linux x86-64
+make build-linux-arm64                        # Linux arm64（需 gcc-aarch64-linux-gnu）
+make build-windows-amd64                      # Windows x86-64（需 mingw-w64）
+make build-darwin-amd64 / build-darwin-arm64  # macOS（需在 macOS 主机上构建）
+```
+
+发布打包：`make release`（输出 `dist/<plugin>_<version>_<goos>_<goarch>.zip` + `checksums.txt`），另提供 `release-windows-amd64`、`release-darwin-amd64`、`release-darwin-arm64`。
+
+## Registry 文件
+
+仓库提供三份 Plugin Store schema v1 文件（`registry.json` 双语、`registry.zh-CN.json`、`registry.en.json`）。发布前将三份文件中的 `https://github.com/OWNER/warp-egress` 替换为真实仓库地址并执行：
+
+```bash
+make registry-check
+```
+
+详见 `REGISTRY.md`。
