@@ -928,17 +928,18 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 	return res, nil
 }
 
-// evaluateQualityTasks 由健康检查循环周期调用：自动补充健康出口 + 清理历史出口。
+// evaluateQualityTasks 由健康检查循环周期调用：自动清理 + 自动补充出口。
+// 清理先于补充执行，释放名额后补充判断更准确（避免降智/异常出口占位）。
 func (m *Manager) evaluateQualityTasks() {
 	q := m.stateStore().Quality()
 	if !q.Enabled {
 		return
 	}
-	if q.AutoProvision {
-		_ = m.autoProvision(q)
-	}
 	if q.AutoPrune {
 		m.autoPrune(q)
+	}
+	if q.AutoProvision {
+		_ = m.autoProvision(q)
 	}
 }
 
@@ -1044,13 +1045,16 @@ func (m *Manager) autoPrune(q QualityConfig) {
 	sorted := append([]*Profile(nil), profiles...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].CreatedAt.Before(sorted[j].CreatedAt) })
 
-	deletable := func(p *Profile) bool {
-		return p != nil && p.Mode == ProfileModeManaged && !referenced[p.ID] && !p.Healthy
+	// 不可用出口：连通失败或被打降智标记。
+	// 与自动补充的"健康"判定（Healthy && !Degraded）保持一致，
+	// 避免降智出口堆积占满名额导致补充失效。
+	unusable := func(p *Profile) bool {
+		return p != nil && p.Mode == ProfileModeManaged && !referenced[p.ID] && (!p.Healthy || p.Degraded)
 	}
 	// 超过上限：优先删除最旧的不健康托管出口。
 	if len(sorted) > q.MaxProfiles {
 		for _, p := range sorted {
-			if deletable(p) {
+			if unusable(p) {
 				if err := m.DeleteProfile(p.ID); err == nil {
 					m.setLastError("自动清理出口: " + p.Name)
 				}
@@ -1062,7 +1066,7 @@ func (m *Manager) autoPrune(q QualityConfig) {
 	if q.PruneUnhealthyMinutes > 0 {
 		cutoff := time.Now().Add(-time.Duration(q.PruneUnhealthyMinutes) * time.Minute)
 		for _, p := range sorted {
-			if !deletable(p) {
+			if !unusable(p) {
 				continue
 			}
 			if !p.LastChecked.IsZero() && p.LastChecked.Before(cutoff) && time.Since(p.CreatedAt) > 10*time.Minute {

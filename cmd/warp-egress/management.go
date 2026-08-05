@@ -216,9 +216,11 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 		if err := decodeJSON(req.Body, &body); err != nil {
 			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
 		}
+		oldQuality := m.stateStore().Quality()
 		if err := m.stateStore().SetQuality(body); err != nil {
 			return managementResponse{}, err
 		}
+		saved := m.stateStore().Quality()
 		// 质量守护开关变化后立即同步 XAI 认证文件的自动绑定/解绑。
 		go func() {
 			m.mu.Lock()
@@ -226,7 +228,19 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			m.mu.Unlock()
 			m.syncAutoBoundAuths()
 		}()
-		return jsonResponse(http.StatusOK, m.stateStore().Quality()), nil
+		// 自动补充首次开启（false→true）或补充配置变化时立即判断数量并补充，
+		// 不必等待周期任务与冷却。
+		if saved.AutoProvision && (!oldQuality.AutoProvision ||
+			oldQuality.MinHealthy != saved.MinHealthy ||
+			oldQuality.MaxProfiles != saved.MaxProfiles) {
+			go func() {
+				m.mu.Lock()
+				m.lastProvisionAt = time.Time{}
+				m.mu.Unlock()
+				m.evaluateQualityTasks()
+			}()
+		}
+		return jsonResponse(http.StatusOK, saved), nil
 	case "POST /warp-egress/profiles/probe":
 		var body profileActionRequest
 		if err := decodeJSON(req.Body, &body); err != nil {

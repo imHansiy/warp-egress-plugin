@@ -727,6 +727,72 @@ func TestAutoBindSkipsManuallyBound(t *testing.T) {
 	}
 }
 
+func TestMinHealthyClampedToMaxProfiles(t *testing.T) {
+	manager := newTestManager(t)
+	q := manager.store.Quality()
+	q.MinHealthy = 10
+	q.MaxProfiles = 4
+	if err := manager.store.SetQuality(q); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.store.Quality()
+	if got.MinHealthy != 4 {
+		t.Fatalf("min_healthy must be clamped to max_profiles, got %d", got.MinHealthy)
+	}
+}
+
+func TestAutoPruneRemovesDegradedWhenOverLimit(t *testing.T) {
+	manager := newTestManager(t)
+	now := time.Now()
+	profiles := []*Profile{
+		{ID: "degraded", Name: "degraded", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Degraded: true, CreatedAt: now.Add(-48 * time.Hour)},
+		{ID: "ok1", Name: "ok1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, CreatedAt: now.Add(-24 * time.Hour)},
+		{ID: "ok2", Name: "ok2", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41003", Healthy: true, CreatedAt: now.Add(-1 * time.Hour)},
+	}
+	for _, p := range profiles {
+		if err := manager.store.AddProfile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := manager.store.Quality()
+	q.MaxProfiles = 2
+	q.AutoPrune = true
+	if err := manager.store.SetQuality(q); err != nil {
+		t.Fatal(err)
+	}
+	manager.autoPrune(q)
+	if manager.store.Profile("degraded") != nil {
+		t.Fatal("degraded egress must be pruned first when over limit (consistent with auto-provision's healthy definition)")
+	}
+	if manager.store.Profile("ok1") == nil || manager.store.Profile("ok2") == nil {
+		t.Fatal("healthy egresses must survive pruning")
+	}
+}
+
+func TestAutoPruneKeepsDegradedWhenWithinLimit(t *testing.T) {
+	manager := newTestManager(t)
+	now := time.Now()
+	profiles := []*Profile{
+		{ID: "d1", Name: "d1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Degraded: true, CreatedAt: now.Add(-48 * time.Hour)},
+		{ID: "ok", Name: "ok", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, CreatedAt: now.Add(-1 * time.Hour)},
+	}
+	for _, p := range profiles {
+		if err := manager.store.AddProfile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := manager.store.Quality()
+	q.MaxProfiles = 8
+	q.AutoPrune = true
+	if err := manager.store.SetQuality(q); err != nil {
+		t.Fatal(err)
+	}
+	manager.autoPrune(q)
+	if manager.store.Profile("d1") == nil {
+		t.Fatal("degraded egress within limit must survive (recoverable via healthy observations)")
+	}
+}
+
 func TestQualityStateDefaultsAndRoundTrip(t *testing.T) {
 	manager := newTestManager(t)
 	q := manager.store.Quality()

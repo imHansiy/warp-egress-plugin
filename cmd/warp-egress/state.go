@@ -304,6 +304,10 @@ func (s *StateStore) SetQuality(config QualityConfig) error {
 	if config.MaxProfiles < 1 {
 		config.MaxProfiles = defaults.MaxProfiles
 	}
+	// 防配置死锁：min_healthy 不能超过 max_profiles，否则补充永远无法达标。
+	if config.MinHealthy > config.MaxProfiles {
+		config.MinHealthy = config.MaxProfiles
+	}
 	if config.ProvisionCooldownMin <= 0 {
 		config.ProvisionCooldownMin = defaults.ProvisionCooldownMin
 	}
