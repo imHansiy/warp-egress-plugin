@@ -58,6 +58,9 @@ func managementRoutes() managementRegistration {
 			{Method: http.MethodPost, Path: "/warp-egress/quality/save"},
 			{Method: http.MethodPost, Path: "/warp-egress/profiles/probe"},
 			{Method: http.MethodPost, Path: "/warp-egress/quality/prune"},
+			{Method: http.MethodGet, Path: "/warp-egress/settings"},
+			{Method: http.MethodPost, Path: "/warp-egress/settings/save"},
+			{Method: http.MethodPost, Path: "/warp-egress/settings/cleanup"},
 		},
 	}
 }
@@ -254,6 +257,23 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 	case "POST /warp-egress/quality/prune":
 		m.evaluateQualityTasks()
 		return jsonResponse(http.StatusOK, m.stateStore().Quality()), nil
+	case "GET /warp-egress/settings":
+		return jsonResponse(http.StatusOK, map[string]any{
+			"settings": m.stateStore().Settings(),
+			"auto":     m.stateStore().AutoSwitch(),
+		}), nil
+	case "POST /warp-egress/settings/save":
+		var body SettingsConfig
+		if err := decodeJSON(req.Body, &body); err != nil {
+			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		if err := m.stateStore().SetSettings(body); err != nil {
+			return managementResponse{}, err
+		}
+		return jsonResponse(http.StatusOK, m.stateStore().Settings()), nil
+	case "POST /warp-egress/settings/cleanup":
+		m.cleanupUnhealthy()
+		return jsonResponse(http.StatusOK, map[string]any{"ok": true}), nil
 	default:
 		return jsonResponse(http.StatusNotFound, map[string]any{"error": "route not found", "method": method, "path": path}), nil
 	}

@@ -60,7 +60,7 @@ func (s *StateStore) Save() error {
 }
 
 func cloneState(src PersistedState) PersistedState {
-	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, AutoBoundAuths: map[string]string{}}
+	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, Settings: src.Settings, AutoBoundAuths: map[string]string{}}
 	for key, value := range src.AutoBoundAuths {
 		dst.AutoBoundAuths[key] = value
 	}
@@ -260,6 +260,26 @@ func (s *StateStore) AutoBoundAuths() map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func (s *StateStore) Settings() SettingsConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state.Settings.CleanupUnhealthy == false && s.state.Settings.CleanupUnhealthyMinutes == 0 {
+		return defaultSettingsConfig()
+	}
+	return s.state.Settings
+}
+
+func (s *StateStore) SetSettings(config SettingsConfig) error {
+	defaults := defaultSettingsConfig()
+	if config.CleanupUnhealthyMinutes < 0 {
+		config.CleanupUnhealthyMinutes = defaults.CleanupUnhealthyMinutes
+	}
+	s.mu.Lock()
+	s.state.Settings = config
+	s.mu.Unlock()
+	return s.Save()
 }
 
 func (s *StateStore) RecordSwitch(profileID, reason string) error {

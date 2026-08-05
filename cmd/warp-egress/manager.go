@@ -180,6 +180,7 @@ func (m *Manager) startHealthLoop() {
 			case <-timer.C:
 				_ = m.CheckAllProfiles()
 				_, _ = m.EvaluateAutoSwitch(false)
+				m.cleanupUnhealthy()
 				m.runQualityTasksOnce()
 			}
 		}

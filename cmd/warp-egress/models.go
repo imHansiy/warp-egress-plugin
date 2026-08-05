@@ -256,12 +256,25 @@ func defaultQualityConfig() QualityConfig {
 	}
 }
 
+// SettingsConfig 通用设置（与 xAI 降智守护无关，任何场景都生效）。
+type SettingsConfig struct {
+	// 自动清理不健康出口：连通失败（Healthy=false）且未被规则引用的
+	// 托管出口自动删除，防止异常出口堆积占满出口池。
+	CleanupUnhealthy        bool `json:"cleanup_unhealthy_enabled"`
+	CleanupUnhealthyMinutes int  `json:"cleanup_unhealthy_minutes"`
+}
+
+func defaultSettingsConfig() SettingsConfig {
+	return SettingsConfig{CleanupUnhealthy: false, CleanupUnhealthyMinutes: 10}
+}
+
 type PersistedState struct {
 	Version  int              `json:"version"`
 	Profiles []*Profile       `json:"profiles"`
 	Rules    Rules            `json:"rules"`
 	Auto     AutoSwitchConfig `json:"auto_switch"`
 	Quality  QualityConfig    `json:"quality,omitempty"`
+	Settings SettingsConfig   `json:"settings,omitempty"`
 	// AutoBoundAuths 记录由 xAI 降智守护自动绑定出口的 XAI 认证文件
 	// （auth_index → profile_id），关闭 xAI 降智守护时自动解绑恢复原状。
 	AutoBoundAuths map[string]string `json:"auto_bound_auths,omitempty"`

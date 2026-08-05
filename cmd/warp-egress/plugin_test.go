@@ -245,9 +245,10 @@ func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 		"id=\"routingOverlay\"",
 		"id=\"routingRules\"",
 		"id=\"routingAuth\"",
-		"data-action=\"open-auto\"",
+		"data-action=\"open-settings\"",
 		"data-action=\"open-extras\"",
 		"id=\"extrasOverlay\"",
+		"id=\"settingsOverlay\"",
 		"id=\"connectOverlay\"",
 	}
 	for _, marker := range required {
