@@ -164,16 +164,15 @@ func (m *Manager) Shutdown() {
 		m.cancelStream = nil
 	}
 	sysProxy := m.systemProxyInstance
-	m.mu.Unlock()
-	if sysProxy != nil {
-		sysProxy.Stop()
-	}
 	relay := m.relay
 	ids := make([]string, 0, len(m.processes))
 	for id := range m.processes {
 		ids = append(ids, id)
 	}
 	m.mu.Unlock()
+	if sysProxy != nil {
+		sysProxy.Stop()
+	}
 	if relay != nil {
 		relay.Close()
 	}
