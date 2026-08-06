@@ -16,7 +16,33 @@
         "warp",
         "egress",
         "routing"
-      ]
+      ],
+      "install": {
+        "type": "direct",
+        "artifacts": [
+          {
+            "goos": "linux",
+            "goarch": "amd64",
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.5.0/warp-egress_0.5.0_linux_amd64.zip",
+            "sha256": "cfed5dd15a56532674a0ed992d8a3e1874fd1799e67d1d36ce57cb66d073abca",
+            "size": 12208026
+          },
+          {
+            "goos": "linux",
+            "goarch": "arm64",
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.5.0/warp-egress_0.5.0_linux_arm64.zip",
+            "sha256": "8032ada2076f039c4bb7d3a4708cff9192f3608f4f8c3e0dcc5be78c35bdba9a",
+            "size": 11894472
+          },
+          {
+            "goos": "windows",
+            "goarch": "amd64",
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.5.0/warp-egress_0.5.0_windows_amd64.zip",
+            "sha256": "a83a2c91721fedc04480fca75086a201fd66ec6afa2cce121c3cc4401af1b5cb",
+            "size": 12134553
+          }
+        ]
+      }
     }
   ]
 }
