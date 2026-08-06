@@ -129,12 +129,13 @@ func TestSystemProxyBridge(t *testing.T) {
 	}
 
 	// 端口占用时启动失败提示
-	occupied, err := net.Listen("tcp", "127.0.0.1:40001")
+	occupiedPort := freeTCPPort(t)
+	occupied, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(occupiedPort))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer occupied.Close()
-	sysProxy2 := newSystemProxy(40001, filepath.Join(t.TempDir(), "p.sh"), func() (string, error) { return "", nil })
+	sysProxy2 := newSystemProxy(occupiedPort, filepath.Join(t.TempDir(), "p.sh"), func() (string, error) { return "", nil })
 	if err := sysProxy2.Start(); err == nil {
 		t.Fatal("bridge must fail when port is occupied")
 	}

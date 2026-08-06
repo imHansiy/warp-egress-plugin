@@ -296,7 +296,7 @@ async function loadAll(){
 async function loadAuth(){var result=await api('/auth-files');state.files=(result&&result.files)||[];state.authLoaded=true;renderAuth()}
 function renderAll(){updateConnection();renderCurrent();renderProfiles();renderSummary();renderRules();renderAuto();renderQuality();renderProvision();renderCleanup()}
 function renderCleanup(){var s=state.settings||{};el('cleanupUnhealthy').checked=!!s.cleanup_unhealthy_enabled;el('cleanupUnhealthyMinutes').value=s.cleanup_unhealthy_minutes!=null?s.cleanup_unhealthy_minutes:10}
-function renderSysProxy(){var s=state.settings||{};var sp=s.system_proxy||{};el('sysProxyEnabled').checked=!!sp.enabled;el('sysProxyPort').value=sp.port||40001;var st=el('sysProxyStatus');if(st)st.textContent=(sp.enabled?('已应用到系统（HTTP 桥端口 '+(sp.port||40001)+'，写入 /etc/profile.d/warp-egress-proxy.sh）'):'未应用到系统')}
+function renderSysProxy(){var s=state.settings||{};var sp=s.system_proxy||{};el('sysProxyEnabled').checked=!!sp.enabled;el('sysProxyPort').value=sp.port||40001;var st=el('sysProxyStatus');if(st)st.textContent=(sp.enabled?('已应用到系统（HTTP 桥端口 '+(sp.port||40001)+'，桌面系统设置即时生效，服务器新进程生效）'):'未应用到系统')}
 function renderProvision(){
   var n=el('provisionNotice');var a=state.status&&state.status.auto_provision;
   if(!a||!a.enabled){n.classList.add('hidden');return}

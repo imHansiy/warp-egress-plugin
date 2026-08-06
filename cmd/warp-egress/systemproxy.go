@@ -280,7 +280,8 @@ func applyDarwinSystemProxy(enabled bool, proxyURL string) error {
 }
 
 // applyWindowsSystemProxy 通过注册表设置 Windows 系统代理
-// （HKCU Internet Settings，与「设置 → 网络 → 代理」同款）。
+// （HKCU Internet Settings，与「设置 → 网络 → 代理」同款），
+// 并广播设置变更让已运行进程立即生效。
 func applyWindowsSystemProxy(enabled bool, port int) error {
 	regPath := `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 	if enabled {
@@ -294,11 +295,10 @@ func applyWindowsSystemProxy(enabled bool, port int) error {
 				return fmt.Errorf("reg %s 失败: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
 			}
 		}
-		return nil
-	}
-	if out, err := exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f").CombinedOutput(); err != nil {
+	} else if out, err := exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f").CombinedOutput(); err != nil {
 		return fmt.Errorf("reg 关闭代理失败: %s", strings.TrimSpace(string(out)))
 	}
+	refreshWindowsProxySettings()
 	return nil
 }
 
