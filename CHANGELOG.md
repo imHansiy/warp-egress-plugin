@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## 0.5.0
+
+- 新增 **系统代理**（设置 → 系统代理，独立开关）：把当前全局出口应用到系统，
+  系统其他进程（AI 服务等）经本地 HTTP 桥（默认 40001）→ 插件中继 → 当前全局出口。
+- 平台接入：Linux GNOME 桌面（gsettings 系统设置面板同款，即时生效）、
+  macOS（networksetup）、Windows（注册表 + InternetSetOption 广播，
+  已运行应用立即感知）；无桌面服务器回退写入 /etc/profile.d 环境变量。
+- 关闭即清理：停止桥 + 移除系统设置/环境文件；重启自动恢复。
+- 修复 Manager.Shutdown 双重 Unlock 崩溃（插件卸载 panic）。
+
 ## 0.4.0
 
 - 插件配置随 CPA 配置体系持久化：config.yaml 插件段新增 `state-json` 权威源
