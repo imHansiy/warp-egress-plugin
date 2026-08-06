@@ -1,13 +1,15 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,9 +17,14 @@ import (
 )
 
 // 系统代理：把当前全局出口应用到系统。系统其他进程（AI 服务等）经
-// HTTP 环境变量（http_proxy/https_proxy/all_proxy）把流量送到本地 HTTP 桥，
-// 桥通过插件中继的 selector 选择当前全局出口（无已选出口时直连）。
+// 本地 HTTP 桥（CONNECT 隧道 → 插件中继 → 当前全局出口）出网。
 // 独立开关：设置面板「系统代理」选择应用到系统或不应用。
+//
+// 平台适配：
+//   - Linux 桌面（GNOME）：gsettings 设置 org.gnome.system.proxy（系统设置面板同款）
+//   - macOS：networksetup 设置系统偏好网络代理
+//   - Windows：注册表 Internet Settings + ProxyEnable
+//   - 无桌面（服务器）或无 gsettings/networksetup：回退写入 /etc/profile.d 环境变量
 
 const defaultSystemProxyPort = 40001
 const defaultSystemProxyFile = "/etc/profile.d/warp-egress-proxy.sh"
@@ -172,14 +179,127 @@ func (m *Manager) ApplySystemProxy(cfg SystemProxyConfig, fileOverride string) e
 		if err := instance.Start(); err != nil {
 			return err
 		}
-		if err := writeSystemProxyEnv(instance.file, cfg.Port); err != nil {
+		if err := applySystemProxySettings(true, cfg.Port, instance.file); err != nil {
 			instance.Stop()
 			return err
 		}
 		return nil
 	}
 	instance.Stop()
-	return removeSystemProxyEnv(instance.file)
+	return applySystemProxySettings(false, cfg.Port, instance.file)
+}
+
+// applySystemProxySettings 按平台把代理应用到系统：
+//   - darwin：networksetup（系统偏好网络代理）
+//   - windows：注册表 Internet Settings
+//   - 其他（linux）：优先 GNOME gsettings（系统设置面板），
+//     无桌面/无 gsettings 时回退写入环境变量文件。
+func applySystemProxySettings(enabled bool, port int, fallbackFile string) error {
+	proxyURL := "http://127.0.0.1:" + strconv.Itoa(port)
+	switch runtime.GOOS {
+	case "darwin":
+		if err := applyDarwinSystemProxy(enabled, proxyURL); err != nil {
+			return err
+		}
+		return nil
+	case "windows":
+		return applyWindowsSystemProxy(enabled, port)
+	default:
+		if err := applyGNOMESystemProxy(enabled, port); err == nil {
+			return nil
+		}
+		// 无桌面/无 gsettings：回退环境变量文件。
+		if enabled {
+			return writeSystemProxyEnv(fallbackFile, port)
+		}
+		return removeSystemProxyEnv(fallbackFile)
+	}
+}
+
+// applyGNOMESystemProxy 通过 gsettings 设置 GNOME 系统代理
+// （与「设置 → 网络 → 网络代理」面板同款，即时生效）。
+func applyGNOMESystemProxy(enabled bool, port int) error {
+	if _, err := exec.LookPath("gsettings"); err != nil {
+		return errors.New("gsettings 不可用（非 GNOME 桌面）")
+	}
+	gs := func(args ...string) error {
+		cmd := exec.Command("gsettings", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("gsettings %s 失败: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	portStr := strconv.Itoa(port)
+	if enabled {
+		if err := gs("set", "org.gnome.system.proxy", "mode", "manual"); err != nil {
+			return err
+		}
+		for _, schema := range []string{"http", "https"} {
+			if err := gs("set", "org.gnome.system.proxy."+schema, "host", "127.0.0.1"); err != nil {
+				return err
+			}
+			if err := gs("set", "org.gnome.system.proxy."+schema, "port", portStr); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return gs("set", "org.gnome.system.proxy", "mode", "none")
+}
+
+// applyDarwinSystemProxy 通过 networksetup 设置 macOS 系统网络代理
+// （所有启用的网络服务，HTTP + HTTPS；与系统偏好设置同款）。
+func applyDarwinSystemProxy(enabled bool, proxyURL string) error {
+	if _, err := exec.LookPath("networksetup"); err != nil {
+		return errors.New("networksetup 不可用")
+	}
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return err
+	}
+	host := parsed.Hostname()
+	port := parsed.Port()
+	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	if err != nil {
+		return fmt.Errorf("networksetup 列表服务失败: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		service := strings.TrimSpace(line)
+		if service == "" || strings.HasPrefix(service, "*") || strings.HasPrefix(service, "An asterisk") {
+			continue
+		}
+		if enabled {
+			_ = exec.Command("networksetup", "-setwebproxy", service, host, port).Run()
+			_ = exec.Command("networksetup", "-setsecurewebproxy", service, host, port).Run()
+		} else {
+			_ = exec.Command("networksetup", "-setwebproxystate", service, "off").Run()
+			_ = exec.Command("networksetup", "-setsecurewebproxystate", service, "off").Run()
+		}
+	}
+	return nil
+}
+
+// applyWindowsSystemProxy 通过注册表设置 Windows 系统代理
+// （HKCU Internet Settings，与「设置 → 网络 → 代理」同款）。
+func applyWindowsSystemProxy(enabled bool, port int) error {
+	regPath := `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+	if enabled {
+		cmds := [][]string{
+			{"add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f"},
+			{"add", regPath, "/v", "ProxyServer", "/t", "REG_SZ", "/d", "127.0.0.1:" + strconv.Itoa(port), "/f"},
+			{"add", regPath, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "<local>", "/f"},
+		}
+		for _, args := range cmds {
+			if out, err := exec.Command("reg", args...).CombinedOutput(); err != nil {
+				return fmt.Errorf("reg %s 失败: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+			}
+		}
+		return nil
+	}
+	if out, err := exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f").CombinedOutput(); err != nil {
+		return fmt.Errorf("reg 关闭代理失败: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // writeSystemProxyEnv 写入系统环境文件（http_proxy/https_proxy/all_proxy/no_proxy）。
@@ -217,5 +337,3 @@ func dirOf(path string) string {
 	return path[:idx]
 }
 
-var _ = context.Background
-var _ = time.Now

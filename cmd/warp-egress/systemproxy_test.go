@@ -15,6 +15,24 @@ import (
 	"time"
 )
 
+func TestApplySystemProxyFallsBackToEnvFile(t *testing.T) {
+	// 非桌面/无 gsettings 环境：开启应写入环境文件，关闭应删除。
+	dir := t.TempDir()
+	file := filepath.Join(dir, "proxy.sh")
+	if err := applySystemProxySettings(true, 40001, file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatal("fallback env file must be written")
+	}
+	if err := applySystemProxySettings(false, 40001, file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatal("fallback env file must be removed on disable")
+	}
+}
+
 func TestWriteAndRemoveSystemProxyEnv(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "warp-egress-proxy.sh")
