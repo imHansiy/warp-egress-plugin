@@ -27,8 +27,8 @@ def validate_repository(value: str) -> None:
 def validate_file(path: Path) -> list[str]:
     warnings: list[str] = []
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1:
-        raise ValueError(f"{path.name}: schema_version must be 1")
+    if data.get("schema_version") not in (1, 2):
+        raise ValueError(f"{path.name}: schema_version must be 1 or 2")
     plugins = data.get("plugins")
     if not isinstance(plugins, list) or not plugins:
         raise ValueError(f"{path.name}: plugins must be a non-empty array")
