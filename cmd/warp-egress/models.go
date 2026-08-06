@@ -262,6 +262,19 @@ type SettingsConfig struct {
 	// 托管出口自动删除，防止异常出口堆积占满出口池。
 	CleanupUnhealthy        bool `json:"cleanup_unhealthy_enabled"`
 	CleanupUnhealthyMinutes int  `json:"cleanup_unhealthy_minutes"`
+	// SystemProxy 系统代理：把当前全局出口应用到系统（写入
+	// /etc/profile.d/warp-egress-proxy.sh 环境变量），系统其他进程
+	// 的网络经 HTTP 桥 → 插件中继 → 当前全局出口。
+	SystemProxy SystemProxyConfig `json:"system_proxy,omitempty"`
+}
+
+// SystemProxyConfig 系统代理配置（独立开关：应用到系统 / 不应用）。
+type SystemProxyConfig struct {
+	Enabled bool `json:"enabled"`
+	// Port HTTP 桥监听端口（默认 40001）。
+	Port int `json:"port"`
+	// File 系统环境文件（默认 /etc/profile.d/warp-egress-proxy.sh）。
+	File string `json:"file,omitempty"`
 }
 
 func defaultSettingsConfig() SettingsConfig {

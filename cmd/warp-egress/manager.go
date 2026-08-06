@@ -37,6 +37,8 @@ type Manager struct {
 	lastUsageAuth     string
 	lastUsageTokens   int64
 	lastUsageLatency  string
+	// 系统代理
+	systemProxyInstance *systemProxy
 	// 流式补偿轨道
 	streamMu           sync.Mutex
 	streamTracks       map[string]*streamTrack
@@ -125,6 +127,12 @@ func (m *Manager) Configure(raw []byte) error {
 	m.streamTracks = map[string]*streamTrack{}
 	m.mu.Unlock()
 	m.startStreamTrackTTLCleanup(streamCtx)
+	// 系统代理：按设置启动（写入系统环境文件）。
+	if m.stateStore() != nil && m.stateStore().Settings().SystemProxy.Enabled {
+		if err := m.ApplySystemProxy(m.stateStore().Settings().SystemProxy, ""); err != nil {
+			m.setLastError("系统代理启动失败: " + err.Error())
+		}
+	}
 	return nil
 }
 
@@ -155,12 +163,16 @@ func (m *Manager) Shutdown() {
 		m.cancelStream()
 		m.cancelStream = nil
 	}
+	sysProxy := m.systemProxyInstance
 	relay := m.relay
 	ids := make([]string, 0, len(m.processes))
 	for id := range m.processes {
 		ids = append(ids, id)
 	}
 	m.mu.Unlock()
+	if sysProxy != nil {
+		sysProxy.Stop()
+	}
 	if relay != nil {
 		relay.Close()
 	}
