@@ -260,14 +260,29 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 		m.evaluateQualityTasks()
 		return jsonResponse(http.StatusOK, m.stateStore().Quality()), nil
 	case "GET /warp-egress/settings":
+		sysRunning := false
+		m.mu.RLock()
+		if m.systemProxyInstance != nil {
+			sysRunning = m.systemProxyInstance.Running()
+		}
+		m.mu.RUnlock()
 		return jsonResponse(http.StatusOK, map[string]any{
 			"settings": m.stateStore().Settings(),
 			"auto":     m.stateStore().AutoSwitch(),
+			"system_proxy_running": sysRunning,
 		}), nil
 	case "POST /warp-egress/settings/save":
 		var body SettingsConfig
 		if err := decodeJSON(req.Body, &body); err != nil {
 			return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+		}
+		// 系统代理开关变化时先应用（写入/清理系统环境文件），失败则回滚保存。
+		oldSettings := m.stateStore().Settings()
+		if oldSettings.SystemProxy.Enabled != body.SystemProxy.Enabled ||
+			oldSettings.SystemProxy.Port != body.SystemProxy.Port {
+			if err := m.ApplySystemProxy(body.SystemProxy, ""); err != nil {
+				return jsonResponse(http.StatusBadRequest, map[string]any{"error": err.Error()}), nil
+			}
 		}
 		if err := m.stateStore().SetSettings(body); err != nil {
 			return managementResponse{}, err
