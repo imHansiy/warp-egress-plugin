@@ -64,9 +64,6 @@ func (s *StateStore) ReplaceState(state PersistedState) error {
 	if state.Rules.ExactRules == nil {
 		state.Rules.ExactRules = map[string]string{}
 	}
-	if state.AutoBoundAuths == nil {
-		state.AutoBoundAuths = map[string]string{}
-	}
 	for _, p := range state.Profiles {
 		if p == nil {
 			continue
@@ -81,10 +78,7 @@ func (s *StateStore) ReplaceState(state PersistedState) error {
 }
 
 func cloneState(src PersistedState) PersistedState {
-	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, Settings: src.Settings, AutoBoundAuths: map[string]string{}}
-	for key, value := range src.AutoBoundAuths {
-		dst.AutoBoundAuths[key] = value
-	}
+	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, Settings: src.Settings}
 	for _, p := range src.Profiles {
 		dst.Profiles = append(dst.Profiles, cloneProfile(p))
 	}
@@ -263,26 +257,6 @@ func (s *StateStore) SetAutoSwitch(config AutoSwitchConfig) error {
 	return s.Save()
 }
 
-func (s *StateStore) SetAutoBoundAuths(bound map[string]string) error {
-	s.mu.Lock()
-	if bound == nil {
-		bound = map[string]string{}
-	}
-	s.state.AutoBoundAuths = bound
-	s.mu.Unlock()
-	return s.Save()
-}
-
-func (s *StateStore) AutoBoundAuths() map[string]string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := map[string]string{}
-	for key, value := range s.state.AutoBoundAuths {
-		out[key] = value
-	}
-	return out
-}
-
 func (s *StateStore) Settings() SettingsConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -357,6 +331,9 @@ func (s *StateStore) SetQuality(config QualityConfig) error {
 	}
 	if config.Probe.TimeoutSeconds <= 0 {
 		config.Probe.TimeoutSeconds = defaults.Probe.TimeoutSeconds
+	}
+	if config.Probe.IntervalMinutes <= 0 {
+		config.Probe.IntervalMinutes = defaults.Probe.IntervalMinutes
 	}
 	s.mu.Lock()
 	s.state.Quality = config

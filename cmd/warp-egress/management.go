@@ -226,13 +226,6 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			return managementResponse{}, err
 		}
 		saved := m.stateStore().Quality()
-		// xAI 降智守护开关变化后立即同步 XAI 认证文件的自动绑定/解绑。
-		go func() {
-			m.mu.Lock()
-			m.lastAutoBindSync = time.Time{}
-			m.mu.Unlock()
-			m.syncAutoBoundAuths()
-		}()
 		// 自动补充首次开启（false→true）或补充配置变化时立即判断数量并补充，
 		// 不必等待周期任务与冷却。
 		if saved.AutoProvision && (!oldQuality.AutoProvision ||
@@ -267,8 +260,8 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 		}
 		m.mu.RUnlock()
 		return jsonResponse(http.StatusOK, map[string]any{
-			"settings": m.stateStore().Settings(),
-			"auto":     m.stateStore().AutoSwitch(),
+			"settings":             m.stateStore().Settings(),
+			"auto":                 m.stateStore().AutoSwitch(),
 			"system_proxy_running": sysRunning,
 		}), nil
 	case "POST /warp-egress/settings/save":

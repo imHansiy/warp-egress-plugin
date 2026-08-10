@@ -1,21 +1,27 @@
 package main
 
 import (
-		"net"
-	"net/http"
-	"io"
 	"crypto/tls"
-	"strconv"
+	"io"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestApplySystemProxyFallsBackToEnvFile(t *testing.T) {
+	// 该用例验证 Linux 无桌面环境写入 profile.d 的回退路径；macOS 会调用
+	// networksetup 修改真实网络服务，不属于本用例范围且会阻塞托管 CI runner。
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux fallback test")
+	}
 	// 非桌面/无 gsettings 环境：开启应写入环境文件，关闭应删除。
 	dir := t.TempDir()
 	file := filepath.Join(dir, "proxy.sh")
