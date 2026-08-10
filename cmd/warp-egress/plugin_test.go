@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -168,8 +167,8 @@ func TestSOCKSRelayEndToEnd(t *testing.T) {
 	}
 	relayAddress := portListener.Addr().String()
 	_ = portListener.Close()
-	relay := NewSOCKSRelay(relayAddress, func() (string, error) {
-		return "socks5://" + upstreamListener.Addr().String(), nil
+	relay := NewSOCKSRelay(relayAddress, func(string) (relayRoute, error) {
+		return relayRoute{ProxyURL: "socks5://" + upstreamListener.Addr().String()}, nil
 	})
 	if err := relay.Start(); err != nil {
 		t.Fatal(err)
@@ -210,9 +209,10 @@ func TestSOCKSRelayFallsBackToDirectWhenNoProfile(t *testing.T) {
 	}
 	relayAddress := portListener.Addr().String()
 	_ = portListener.Close()
-	// selector 返回错误：没有可用的已选出口。
-	relay := NewSOCKSRelay(relayAddress, func() (string, error) {
-		return "", errors.New("no global WARP profile selected")
+	// 普通全局出口为空由路由器显式返回 direct，不再用 error 混淆
+	// “允许直连”与“xAI 独立出口故障必须阻断”。
+	relay := NewSOCKSRelay(relayAddress, func(string) (relayRoute, error) {
+		return relayRoute{Direct: true}, nil
 	})
 	if err := relay.Start(); err != nil {
 		t.Fatal(err)

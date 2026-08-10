@@ -18,11 +18,11 @@ type SOCKSRelay struct {
 	address  string
 	listener net.Listener
 	running  bool
-	selector func() (string, error)
+	selector func(target string) (relayRoute, error)
 	closeCh  chan struct{}
 }
 
-func NewSOCKSRelay(address string, selector func() (string, error)) *SOCKSRelay {
+func NewSOCKSRelay(address string, selector func(target string) (relayRoute, error)) *SOCKSRelay {
 	return &SOCKSRelay{address: address, selector: selector, closeCh: make(chan struct{})}
 }
 
@@ -74,14 +74,18 @@ func (s *SOCKSRelay) handle(client net.Conn) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	proxyURL, err := s.selector()
+	route, err := s.selector(target)
 	var upstream net.Conn
 	if err != nil {
-		// 没有可用的已选出口（未配置/未选择全局出口）：回退直连。
-		// 否则 CPA 管理请求（配额查询等）会被插件中继阻断。
+		// xAI 独立出口不可用时 selector 会返回错误；这里必须拒绝连接，
+		// 不能沿用普通“未选全局出口”的直连行为而泄漏服务器公网 IP。
+		_ = writeSOCKSReply(client, 0x05, nil)
+		return
+	}
+	if route.Direct {
 		upstream, err = (&net.Dialer{Timeout: 20 * time.Second}).DialContext(ctx, "tcp", target)
 	} else {
-		proxyAddr, addrErr := socksProxyAddress(proxyURL)
+		proxyAddr, addrErr := socksProxyAddress(route.ProxyURL)
 		if addrErr != nil {
 			err = addrErr
 		} else {

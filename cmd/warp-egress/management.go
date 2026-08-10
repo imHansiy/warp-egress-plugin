@@ -226,6 +226,11 @@ func (m *Manager) HandleManagement(raw []byte) (managementResponse, error) {
 			return managementResponse{}, err
 		}
 		saved := m.stateStore().Quality()
+		if saved.Route.Mode == XAIRouteModeIndependent {
+			// 保存后立即补齐独立活动出口；主动验证在后台执行，管理请求
+			// 不会被 xAI 上游响应时间阻塞。
+			go func() { _, _ = m.ensureXAIActiveProfile(false) }()
+		}
 		// 自动补充首次开启（false→true）或补充配置变化时立即判断数量并补充，
 		// 不必等待周期任务与冷却。
 		if saved.AutoProvision && (!oldQuality.AutoProvision ||

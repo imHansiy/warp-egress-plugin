@@ -25,13 +25,15 @@ type Manager struct {
 	lastError    string
 	configured   bool
 
-	qualitySavePending bool
-	qualityTaskRunning bool
-	qualityProbeMu     sync.Mutex
-	qualityProbeAuths  []xaiAccount
-	qualityProbeAuthAt time.Time
-	lastProvisionAt    time.Time
-	provisionError     string
+	qualitySavePending   bool
+	qualityTaskRunning   bool
+	qualityProbeMu       sync.Mutex
+	qualityProbeAuths    []xaiAccount
+	qualityProbeAuthAt   time.Time
+	qualityCrossVerifyMu sync.Mutex
+	qualityCrossVerify   map[string]bool
+	lastProvisionAt      time.Time
+	provisionError       string
 	// 被动 usage 诊断（供排查降智检测链路）
 	usageEvents       int
 	lastUsageProvider string
@@ -53,7 +55,9 @@ type Manager struct {
 	streamSample       string
 }
 
-func NewManager() *Manager { return &Manager{processes: map[string]*managedProcess{}} }
+func NewManager() *Manager {
+	return &Manager{processes: map[string]*managedProcess{}, qualityCrossVerify: map[string]bool{}}
+}
 
 func (m *Manager) Configure(raw []byte) error {
 	var req lifecycleRequest
@@ -82,7 +86,8 @@ func (m *Manager) Configure(raw []byte) error {
 	oldCancel := m.cancelHealth
 	m.cfg = cfg
 	m.store = NewStateStore(cfg.DataDir)
-	m.relay = NewSOCKSRelay(net.JoinHostPort(cfg.ListenHost, fmt.Sprintf("%d", cfg.GlobalPort)), m.selectedProfileProxy)
+	router := NewEgressRouter(m.stateStore)
+	m.relay = NewSOCKSRelay(net.JoinHostPort(cfg.ListenHost, fmt.Sprintf("%d", cfg.GlobalPort)), router.Decide)
 	m.cancelHealth = nil
 	m.configured = true
 	m.lastError = ""
@@ -119,6 +124,9 @@ func (m *Manager) Configure(raw []byte) error {
 			}
 		}
 	}
+	// 加载/启动出口后为独立 xAI 路由选定一个可用出口。该步骤只遍历
+	// 少量 profile，不读取认证目录；没有候选时中继保持 fail-closed。
+	_, _ = m.ensureXAIActiveProfile(false)
 	m.startHealthLoop()
 	m.mu.Lock()
 	if m.cancelStream != nil {
@@ -206,6 +214,7 @@ func (m *Manager) startHealthLoop() {
 			case <-timer.C:
 				_ = m.CheckAllProfiles()
 				_, _ = m.EvaluateAutoSwitch(false)
+				_, _ = m.EvaluateXAISwitch(false)
 				m.cleanupUnhealthy()
 				m.runQualityTasksOnce()
 			}
@@ -551,7 +560,10 @@ func (m *Manager) EvaluateAutoSwitch(force bool) (*Profile, error) {
 	auto := store.AutoSwitch()
 	// xAI 降智守护开启时，全局出口被标记降智也会执行切换：
 	// 降智检测与降智切换是一体的，不需要额外开关。
-	qualityEnabled := store.Quality().Enabled
+	quality := store.Quality()
+	// xAI 独立模式只切换 Quality.Route.ActiveProfileID，不能因为 xAI
+	// 降智顺带改掉普通全局代理。只有 follow_global 才沿用旧切换语义。
+	qualityEnabled := quality.Enabled && quality.Route.Mode == XAIRouteModeFollowGlobal
 	if !auto.Enabled && !force && !qualityEnabled {
 		return nil, nil
 	}
@@ -586,7 +598,6 @@ func (m *Manager) EvaluateAutoSwitch(force bool) (*Profile, error) {
 	if len(profiles) == 0 {
 		return nil, errors.New("no WARP profiles available")
 	}
-	quality := store.Quality()
 	if reason == "degraded" && quality.Probe.Enabled && strings.TrimSpace(quality.Probe.Model) != "" {
 		return m.switchToVerifiedQualityCandidate(current, profiles, auto)
 	}

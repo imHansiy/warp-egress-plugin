@@ -18,7 +18,7 @@ type StateStore struct {
 }
 
 func NewStateStore(dataDir string) *StateStore {
-	return &StateStore{path: filepath.Join(dataDir, "state.json"), state: PersistedState{Version: 1, Rules: Rules{ExactRules: map[string]string{}}}}
+	return &StateStore{path: filepath.Join(dataDir, "state.json"), state: PersistedState{Version: 1, Rules: Rules{ExactRules: map[string]string{}}, Quality: defaultQualityConfig()}}
 }
 
 func (s *StateStore) Load() error {
@@ -41,6 +41,7 @@ func (s *StateStore) Load() error {
 	if state.Rules.ExactRules == nil {
 		state.Rules.ExactRules = map[string]string{}
 	}
+	state.Quality = normalizeQualityConfig(state.Quality)
 	for _, p := range state.Profiles {
 		if p == nil {
 			continue
@@ -64,6 +65,7 @@ func (s *StateStore) ReplaceState(state PersistedState) error {
 	if state.Rules.ExactRules == nil {
 		state.Rules.ExactRules = map[string]string{}
 	}
+	state.Quality = normalizeQualityConfig(state.Quality)
 	for _, p := range state.Profiles {
 		if p == nil {
 			continue
@@ -78,10 +80,16 @@ func (s *StateStore) ReplaceState(state PersistedState) error {
 }
 
 func cloneState(src PersistedState) PersistedState {
-	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: src.Quality, Settings: src.Settings}
+	dst := PersistedState{Version: src.Version, Rules: cloneRules(src.Rules), Auto: src.Auto, Quality: cloneQuality(src.Quality), Settings: src.Settings}
 	for _, p := range src.Profiles {
 		dst.Profiles = append(dst.Profiles, cloneProfile(p))
 	}
+	return dst
+}
+
+func cloneQuality(src QualityConfig) QualityConfig {
+	dst := src
+	dst.Route.Hosts = append([]string(nil), src.Route.Hosts...)
 	return dst
 }
 
@@ -177,6 +185,9 @@ func (s *StateStore) DeleteProfile(id string) error {
 	s.state.Profiles = next
 	if s.state.Rules.GlobalProfileID == id {
 		s.state.Rules.GlobalProfileID = ""
+	}
+	if s.state.Quality.Route.ActiveProfileID == id {
+		s.state.Quality.Route.ActiveProfileID = ""
 	}
 	for i := range s.state.Rules.TypeRules {
 		if s.state.Rules.TypeRules[i].ProfileID == id {
@@ -289,20 +300,31 @@ func (s *StateStore) RecordSwitch(profileID, reason string) error {
 func (s *StateStore) Quality() QualityConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.state.Quality.Enabled == false && s.state.Quality.SoftTPS == 0 && s.state.Quality.ConsecutiveDegraded == 0 {
-		return defaultQualityConfig()
-	}
-	return s.state.Quality
+	return cloneQuality(s.state.Quality)
 }
 
-func (s *StateStore) SetQuality(config QualityConfig) error {
+func normalizeQualityConfig(config QualityConfig) QualityConfig {
 	defaults := defaultQualityConfig()
+	if config.Enabled == false && config.SoftTPS == 0 && config.ConsecutiveDegraded == 0 {
+		return defaults
+	}
+	// schema 2 把参考实现中新加入的 thinking 双重确认默认值一次性迁移进来；
+	// 后续用户显式关闭开关时 schema 已是最新，不会被再次强制打开。
+	if config.PolicySchema < qualityPolicySchema {
+		config.ThinkingGuard = defaults.ThinkingGuard
+		config.ThinkingCrossVerify = defaults.ThinkingCrossVerify
+		config.SoftCrossVerify = defaults.SoftCrossVerify
+		config.PolicySchema = qualityPolicySchema
+	}
 	// 只回填显式为零的字段（避免 UI 少传字段时把默认值清掉）。
 	if config.SoftTPS <= 0 {
 		config.SoftTPS = defaults.SoftTPS
 	}
 	if config.ConsecutiveDegraded <= 0 {
 		config.ConsecutiveDegraded = defaults.ConsecutiveDegraded
+	}
+	if config.ConsecutiveMissingThinking <= 0 {
+		config.ConsecutiveMissingThinking = defaults.ConsecutiveMissingThinking
 	}
 	if config.RecoveryObservations <= 0 {
 		config.RecoveryObservations = defaults.RecoveryObservations
@@ -335,8 +357,52 @@ func (s *StateStore) SetQuality(config QualityConfig) error {
 	if config.Probe.IntervalMinutes <= 0 {
 		config.Probe.IntervalMinutes = defaults.Probe.IntervalMinutes
 	}
+	if strings.TrimSpace(config.Probe.Model) == "" {
+		config.Probe.Model = defaults.Probe.Model
+	}
+	config.Route.Mode = strings.ToLower(strings.TrimSpace(config.Route.Mode))
+	switch config.Route.Mode {
+	case XAIRouteModeIndependent, XAIRouteModeFollowGlobal, XAIRouteModeDirect:
+	default:
+		config.Route.Mode = defaults.Route.Mode
+	}
+	config.Route.Hosts = normalizeXAIHosts(config.Route.Hosts)
+	if len(config.Route.Hosts) == 0 {
+		config.Route.Hosts = append([]string(nil), defaults.Route.Hosts...)
+	}
+	return config
+}
+
+func (s *StateStore) SetQuality(config QualityConfig) error {
+	config = normalizeQualityConfig(config)
 	s.mu.Lock()
+	// 旧版面板未携带 route.active_profile_id 时保留运行中选择，避免一次普通
+	// 参数保存让独立 xAI 出口突然进入 fail-closed。
+	if config.Route.Mode == XAIRouteModeIndependent && config.Route.ActiveProfileID == "" {
+		config.Route.ActiveProfileID = s.state.Quality.Route.ActiveProfileID
+	}
 	s.state.Quality = config
+	s.mu.Unlock()
+	return s.Save()
+}
+
+func (s *StateStore) SetXAIActiveProfile(id string) error {
+	s.mu.Lock()
+	if id != "" {
+		found := false
+		for _, profile := range s.state.Profiles {
+			if profile != nil && profile.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.mu.Unlock()
+			return errors.New("xAI active profile not found")
+		}
+	}
+	s.state.Quality = normalizeQualityConfig(s.state.Quality)
+	s.state.Quality.Route.ActiveProfileID = id
 	s.mu.Unlock()
 	return s.Save()
 }
