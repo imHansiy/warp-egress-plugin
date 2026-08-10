@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -202,7 +201,7 @@ func TestEvaluateAutoSwitchSkipsDegradedAndFailsOver(t *testing.T) {
 	profiles := []*Profile{
 		{ID: "a", Name: "a", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, ExitIP: "203.0.113.1"},
 		{ID: "b", Name: "b", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, ExitIP: "203.0.113.2", Degraded: true},
-		{ID: "c", Name: "c", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41003", Healthy: true, ExitIP: "203.0.113.3"},
+		{ID: "c", Name: "c", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41003", Healthy: true, ExitIP: "203.0.113.3", QualityClassification: "healthy", QualityCheckedAt: time.Now()},
 	}
 	for _, p := range profiles {
 		if err := manager.store.AddProfile(p); err != nil {
@@ -250,7 +249,7 @@ func TestEvaluateAutoSwitchDegradedFailoverIndependent(t *testing.T) {
 	manager := newTestManager(t)
 	profiles := []*Profile{
 		{ID: "a", Name: "a", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, ExitIP: "203.0.113.1"},
-		{ID: "b", Name: "b", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, ExitIP: "203.0.113.2"},
+		{ID: "b", Name: "b", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, ExitIP: "203.0.113.2", QualityClassification: "healthy", QualityCheckedAt: time.Now()},
 	}
 	for _, p := range profiles {
 		if err := manager.store.AddProfile(p); err != nil {
@@ -272,7 +271,7 @@ func TestEvaluateAutoSwitchDegradedFailoverIndependent(t *testing.T) {
 	if selected != nil {
 		t.Fatalf("auto switch disabled must not switch, got %+v", selected)
 	}
-	// 全局出口降智：仅凭降智自动切换即执行切换。
+	// 全局出口降智：仅凭降智守护执行切换，但候选必须近期实测健康。
 	bad := manager.store.Profile("a")
 	bad.Degraded = true
 	bad.DegradedAt = time.Now()
@@ -527,7 +526,9 @@ func TestConcurrentQualityPathNoRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldResolver := authProxyResolver
-	authProxyResolver = func() map[string]string { return map[string]string{"idx-1": "socks5://127.0.0.1:41001", "idx-2": "socks5://127.0.0.1:41002", "idx-3": "socks5://127.0.0.1:41003"} }
+	authProxyResolver = func() map[string]string {
+		return map[string]string{"idx-1": "socks5://127.0.0.1:41001", "idx-2": "socks5://127.0.0.1:41002", "idx-3": "socks5://127.0.0.1:41003"}
+	}
 	defer func() { authProxyResolver = oldResolver }()
 
 	// 并发：usage 观测 + 自动切换评估 + 状态读取 + 流式 chunk + 自动清理
@@ -604,104 +605,157 @@ func TestAutoProvisionCooldownOnFailure(t *testing.T) {
 	}
 }
 
-func TestAutoBindXAIAuths(t *testing.T) {
-	manager := newTestManager(t)
-	profiles := []*Profile{
-		{ID: "w1", Name: "w1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Running: true},
-		{ID: "w2", Name: "w2", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, Running: true},
+func TestHealthyXAIProbeEntry(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name  string
+		entry hostAuthFileEntry
+		want  bool
+	}{
+		{name: "active", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "xai", Status: "active"}, want: true},
+		{name: "legacy status", entry: hostAuthFileEntry{AuthIndex: "a", Type: "grok"}, want: true},
+		{name: "disabled", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "xai", Disabled: true}, want: false},
+		{name: "unavailable", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "xai", Unavailable: true}, want: false},
+		{name: "cooldown status", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "xai", Status: "cooldown"}, want: false},
+		{name: "retry later", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "xai", NextRetryAfter: now.Add(time.Minute)}, want: false},
+		{name: "runtime only", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "xai", RuntimeOnly: true}, want: false},
+		{name: "other provider", entry: hostAuthFileEntry{AuthIndex: "a", Provider: "codex", Status: "active"}, want: false},
 	}
-	for _, p := range profiles {
-		if err := manager.store.AddProfile(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	oldList, oldGet, oldSave := authListForBind, authGetForBind, authSaveForBind
-	defer func() { authListForBind, authGetForBind, authSaveForBind = oldList, oldGet, oldSave }()
-
-	// 带状态的 fake：get 返回最新保存的 proxy_url，save 记录写入。
-	files := map[string]string{"x1": "", "x2": "", "c1": ""}
-	authListForBind = func() (hostAuthListResponse, error) {
-		return hostAuthListResponse{Files: []hostAuthFileEntry{
-			{AuthIndex: "x1", Name: "x1.json", Provider: "xai"},
-			{AuthIndex: "x2", Name: "x2.json", Type: "xai"},
-			{AuthIndex: "c1", Name: "c1.json", Provider: "codex"},
-		}}, nil
-	}
-	authGetForBind = func(authIndex string) (hostAuthGetResponse, error) {
-		return hostAuthGetResponse{Name: authIndex + ".json", JSON: json.RawMessage(`{"type":"xai","proxy_url":"` + files[authIndex] + `"}`)}, nil
-	}
-	authSaveForBind = func(name string, payload json.RawMessage) error {
-		proxy := proxyURLFromAuthJSON(payload)
-		index := strings.TrimSuffix(name, ".json")
-		files[index] = proxy
-		return nil
-	}
-
-	// xAI 降智守护开启：XAI 未绑定 → 自动绑定第一个健康出口；非 XAI 不动。
-	if err := manager.syncAutoBoundAuths(); err != nil {
-		t.Fatal(err)
-	}
-	if files["x1"] != "socks5://127.0.0.1:41001" || files["x2"] != "socks5://127.0.0.1:41001" {
-		t.Fatalf("XAI auths should be auto-bound, got %v", files)
-	}
-	if files["c1"] != "" {
-		t.Fatal("non-XAI auth must not be auto-bound")
-	}
-	bound := manager.store.AutoBoundAuths()
-	if len(bound) != 2 || bound["x1"] != "socks5://127.0.0.1:41001" {
-		t.Fatalf("unexpected auto-bound records: %v", bound)
-	}
-
-	// xAI 降智守护关闭：自动解绑。
-	q := manager.store.Quality()
-	q.Enabled = false
-	if err := manager.store.SetQuality(q); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.syncAutoBoundAuths(); err != nil {
-		t.Fatal(err)
-	}
-	if files["x1"] != "" || files["x2"] != "" {
-		t.Fatalf("auto-bound auths must be unbound, got %v", files)
-	}
-	if len(manager.store.AutoBoundAuths()) != 0 {
-		t.Fatal("auto-bound records must be cleared")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isHealthyXAIProbeEntry(tc.entry, now); got != tc.want {
+				t.Fatalf("expected %v, got %v", tc.want, got)
+			}
+		})
 	}
 }
 
-func TestAutoBindSkipsManuallyBound(t *testing.T) {
-	manager := newTestManager(t)
-	profiles := []*Profile{
-		{ID: "w1", Name: "w1", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41001", Healthy: true, Running: true},
-		{ID: "w2", Name: "w2", Mode: ProfileModeManaged, ProxyURL: "socks5://127.0.0.1:41002", Healthy: true, Running: true},
+func TestListXAIAccountsReadsOnlyHealthyCandidates(t *testing.T) {
+	oldList, oldGet := authListForProbe, authGetForProbe
+	defer func() { authListForProbe, authGetForProbe = oldList, oldGet }()
+
+	files := make([]hostAuthFileEntry, 0, 1004)
+	for i := 0; i < 1000; i++ {
+		files = append(files, hostAuthFileEntry{AuthIndex: "disabled", Provider: "xai", Disabled: true})
 	}
-	for _, p := range profiles {
-		if err := manager.store.AddProfile(p); err != nil {
+	files = append(files,
+		hostAuthFileEntry{AuthIndex: "codex", Provider: "codex", Status: "active"},
+		hostAuthFileEntry{AuthIndex: "expired", Provider: "xai", Status: "active"},
+		hostAuthFileEntry{AuthIndex: "healthy", Provider: "xai", Status: "active"},
+		hostAuthFileEntry{AuthIndex: "cooldown", Provider: "xai", NextRetryAfter: time.Now().Add(time.Hour)},
+	)
+	authListForProbe = func() (hostAuthListResponse, error) {
+		return hostAuthListResponse{Files: files}, nil
+	}
+	gets := []string{}
+	authGetForProbe = func(authIndex string) (hostAuthGetResponse, error) {
+		gets = append(gets, authIndex)
+		if authIndex == "expired" {
+			return hostAuthGetResponse{JSON: json.RawMessage(`{"access_token":"old","expired":"2000-01-01T00:00:00Z"}`)}, nil
+		}
+		return hostAuthGetResponse{JSON: json.RawMessage(`{"access_token":"ok"}`)}, nil
+	}
+
+	accounts := listXAIAccounts(8)
+	if len(accounts) != 1 || accounts[0].AccessToken != "ok" {
+		t.Fatalf("expected one healthy account, got %+v", accounts)
+	}
+	if len(gets) != 2 || gets[0] != "expired" || gets[1] != "healthy" {
+		t.Fatalf("must not read disabled/cooling/non-xAI account files, got %v", gets)
+	}
+}
+
+func TestXAIProbeAccountsCachedAcrossProfiles(t *testing.T) {
+	manager := newTestManager(t)
+	oldList, oldGet := authListForProbe, authGetForProbe
+	defer func() { authListForProbe, authGetForProbe = oldList, oldGet }()
+	lists, gets := 0, 0
+	authListForProbe = func() (hostAuthListResponse, error) {
+		lists++
+		return hostAuthListResponse{Files: []hostAuthFileEntry{{AuthIndex: "healthy", Provider: "xai", Status: "active"}}}, nil
+	}
+	authGetForProbe = func(string) (hostAuthGetResponse, error) {
+		gets++
+		return hostAuthGetResponse{JSON: json.RawMessage(`{"access_token":"ok"}`)}, nil
+	}
+	first := manager.xaiAccountsForProbe(8)
+	second := manager.xaiAccountsForProbe(8)
+	if len(first) != 1 || len(second) != 1 || lists != 1 || gets != 1 {
+		t.Fatalf("healthy probe accounts must be reused from memory, lists=%d gets=%d", lists, gets)
+	}
+}
+
+func TestSelectQualityProbeCandidateStaggersProfiles(t *testing.T) {
+	now := time.Now()
+	profiles := []*Profile{
+		{ID: "recent", Running: true, Healthy: true, ProxyURL: "socks5://127.0.0.1:1", QualityCheckedAt: now.Add(-time.Minute)},
+		{ID: "old", Running: true, Healthy: true, ProxyURL: "socks5://127.0.0.1:2", QualityCheckedAt: now.Add(-time.Hour)},
+		{ID: "untested", Running: true, Healthy: true, ProxyURL: "socks5://127.0.0.1:3"},
+		{ID: "stopped", Mode: ProfileModeManaged, Running: false, Healthy: true, ProxyURL: "socks5://127.0.0.1:4"},
+		{ID: "unhealthy", Running: true, Healthy: false, ProxyURL: "socks5://127.0.0.1:5"},
+	}
+	if got := selectQualityProbeCandidate(profiles, 15*time.Minute, now); got == nil || got.ID != "untested" {
+		t.Fatalf("untested profile must be probed first, got %+v", got)
+	}
+	profiles[2].QualityCheckedAt = now
+	if got := selectQualityProbeCandidate(profiles, 15*time.Minute, now); got == nil || got.ID != "old" {
+		t.Fatalf("oldest due profile must be selected, got %+v", got)
+	}
+}
+
+func TestEvaluateDegradedSwitchUsesFreshVerifiedStandby(t *testing.T) {
+	manager := newTestManager(t)
+	now := time.Now()
+	current := &Profile{ID: "current", Name: "a-current", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41001", Running: true, Healthy: true, Degraded: true, ExitIP: "1.1.1.1"}
+	standby := &Profile{ID: "standby", Name: "b-standby", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41002", Running: true, Healthy: true, ExitIP: "2.2.2.2", QualityClassification: "healthy", QualityCheckedAt: now}
+	for _, profile := range []*Profile{current, standby} {
+		if err := manager.store.AddProfile(profile); err != nil {
 			t.Fatal(err)
 		}
 	}
-	oldList, oldGet, oldSave := authListForBind, authGetForBind, authSaveForBind
-	defer func() { authListForBind, authGetForBind, authSaveForBind = oldList, oldGet, oldSave }()
-	authListForBind = func() (hostAuthListResponse, error) {
-		return hostAuthListResponse{Files: []hostAuthFileEntry{
-			{AuthIndex: "x1", Name: "x1.json", Provider: "xai", ProxyURL: "socks5://127.0.0.1:41002"},
-			{AuthIndex: "x2", Name: "x2.json", Provider: "xai"},
-		}}, nil
-	}
-	authGetForBind = func(authIndex string) (hostAuthGetResponse, error) {
-		return hostAuthGetResponse{Name: authIndex + ".json", JSON: json.RawMessage(`{"type":"xai","proxy_url":""}`)}, nil
-	}
-	authSaveForBind = func(name string, payload json.RawMessage) error { return nil }
-	// 已手动绑定的 x1 不动；x2 自动绑定。
-	if err := manager.syncAutoBoundAuths(); err != nil {
+	if err := manager.store.SetRules(Rules{GlobalProfileID: current.ID, ExactRules: map[string]string{}}); err != nil {
 		t.Fatal(err)
 	}
-	bound := manager.store.AutoBoundAuths()
-	if _, ok := bound["x1"]; ok {
-		t.Fatal("manually bound auth must not be recorded as auto-bound")
+	q := manager.store.Quality()
+	q.Probe.Enabled = true
+	q.Probe.Model = "grok-4"
+	if err := manager.store.SetQuality(q); err != nil {
+		t.Fatal(err)
 	}
-	if bound["x2"] != "socks5://127.0.0.1:41001" {
-		t.Fatalf("unbound x2 should be auto-bound, got %v", bound)
+	got, err := manager.EvaluateAutoSwitch(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ID != standby.ID || manager.store.Rules().GlobalProfileID != standby.ID {
+		t.Fatalf("expected verified standby switch, got %+v", got)
+	}
+}
+
+func TestDegradedSwitchDoesNotReprobeFreshFailure(t *testing.T) {
+	manager := newTestManager(t)
+	now := time.Now()
+	current := &Profile{ID: "current", Name: "a-current", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41001", Running: true, Healthy: true, Degraded: true}
+	failed := &Profile{ID: "failed", Name: "b-failed", Mode: ProfileModeExternal, ProxyURL: "socks5://127.0.0.1:41002", Running: true, Healthy: true, QualityClassification: "error", QualityCheckedAt: now}
+	for _, profile := range []*Profile{current, failed} {
+		if err := manager.store.AddProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manager.store.SetRules(Rules{GlobalProfileID: current.ID, ExactRules: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	oldList := authListForProbe
+	defer func() { authListForProbe = oldList }()
+	listCalls := 0
+	authListForProbe = func() (hostAuthListResponse, error) {
+		listCalls++
+		return hostAuthListResponse{}, nil
+	}
+	if selected, err := manager.EvaluateAutoSwitch(false); err == nil || selected != nil {
+		t.Fatalf("fresh failed candidate must not be selected, selected=%+v err=%v", selected, err)
+	}
+	if listCalls != 0 {
+		t.Fatalf("fresh failed candidate must wait for interval before reprobe, list calls=%d", listCalls)
 	}
 }
 

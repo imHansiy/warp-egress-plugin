@@ -97,17 +97,21 @@ type managementResponse struct {
 }
 
 type hostAuthFileEntry struct {
-	ID          string            `json:"id"`
-	AuthIndex   string            `json:"auth_index"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Provider    string            `json:"provider"`
-	Label       string            `json:"label"`
-	Email       string            `json:"email"`
-	Disabled    bool              `json:"disabled"`
-	RuntimeOnly bool              `json:"runtime_only"`
-	ProxyURL    string            `json:"proxy_url"`
-	Attributes  map[string]string `json:"attributes,omitempty"`
+	ID             string            `json:"id"`
+	AuthIndex      string            `json:"auth_index"`
+	Name           string            `json:"name"`
+	Type           string            `json:"type"`
+	Provider       string            `json:"provider"`
+	Label          string            `json:"label"`
+	Email          string            `json:"email"`
+	Status         string            `json:"status"`
+	StatusMessage  string            `json:"status_message"`
+	Disabled       bool              `json:"disabled"`
+	Unavailable    bool              `json:"unavailable"`
+	RuntimeOnly    bool              `json:"runtime_only"`
+	NextRetryAfter time.Time         `json:"next_retry_after,omitempty"`
+	ProxyURL       string            `json:"proxy_url"`
+	Attributes     map[string]string `json:"attributes,omitempty"`
 }
 
 type hostAuthListResponse struct {
@@ -171,6 +175,11 @@ type Profile struct {
 	QualityStrikes   int       `json:"quality_strikes,omitempty"`
 	QualityRecovery  int       `json:"quality_recovery,omitempty"`
 	QualityCheckedAt time.Time `json:"quality_checked_at,omitempty"`
+	// QualityClassification / QualitySource 记录最近一次 xAI 质量结论及来源，
+	// 让全局降智切换只选择近期主动探测或真实请求确认健康的备用出口。
+	QualityClassification string `json:"quality_classification,omitempty"`
+	QualitySource         string `json:"quality_source,omitempty"`
+	QualityError          string `json:"quality_error,omitempty"`
 	// Origin 出口来源：空为手动创建，"auto" 为自动补充创建。
 	Origin string `json:"origin,omitempty"`
 }
@@ -210,10 +219,11 @@ type AutoSwitchConfig struct {
 // 的 xAI 账号向 xAI 端点发流式请求，实测输出 TPS。检测对象与降智特征一致
 // （xAI 输出 TPS 异常飙升=共享出口被打穿），无需额外配置 API Key。
 type QualityProbeConfig struct {
-	Enabled        bool   `json:"enabled"`
-	Model          string `json:"model"`
-	MaxTokens      int    `json:"max_tokens"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
+	Enabled         bool   `json:"enabled"`
+	Model           string `json:"model"`
+	MaxTokens       int    `json:"max_tokens"`
+	TimeoutSeconds  int    `json:"timeout_seconds"`
+	IntervalMinutes int    `json:"interval_minutes"`
 }
 
 // QualityConfig xAI 降智守护策略（仅针对 xAI / Grok 输出降智）：
@@ -221,37 +231,39 @@ type QualityProbeConfig struct {
 // TPS 异常高说明出口共享 IP 被打穿（对 AI 生成表现为"降智"），
 // 连续多次则给该出口打降智标记，路由分流自动跳过。
 type QualityConfig struct {
-	Enabled               bool               `json:"enabled"`
-	SoftTPS               float64            `json:"soft_tps"`
-	ConsecutiveDegraded   int                `json:"consecutive_degraded"`
-	RecoveryObservations  int                `json:"recovery_observations"`
-	MinGenerationMs       int64              `json:"min_generation_ms"`
-	MinOutputTokens       int64              `json:"min_output_tokens"`
-	AutoProvision         bool               `json:"auto_provision"`
-	AutoPrune             bool               `json:"auto_prune"`
-	MinHealthy            int                `json:"min_healthy"`
-	MaxProfiles           int                `json:"max_profiles"`
-	ProvisionCooldownMin  int                `json:"provision_cooldown_minutes"`
-	Probe                 QualityProbeConfig `json:"probe"`
+	Enabled              bool               `json:"enabled"`
+	SoftTPS              float64            `json:"soft_tps"`
+	ConsecutiveDegraded  int                `json:"consecutive_degraded"`
+	RecoveryObservations int                `json:"recovery_observations"`
+	MinGenerationMs      int64              `json:"min_generation_ms"`
+	MinOutputTokens      int64              `json:"min_output_tokens"`
+	AutoProvision        bool               `json:"auto_provision"`
+	AutoPrune            bool               `json:"auto_prune"`
+	MinHealthy           int                `json:"min_healthy"`
+	MaxProfiles          int                `json:"max_profiles"`
+	ProvisionCooldownMin int                `json:"provision_cooldown_minutes"`
+	Probe                QualityProbeConfig `json:"probe"`
 }
 
 func defaultQualityConfig() QualityConfig {
 	return QualityConfig{
-		Enabled:               true,
-		SoftTPS:               500,
-		ConsecutiveDegraded:   3,
-		RecoveryObservations:  2,
-		MinGenerationMs:       1000,
-		MinOutputTokens:       32,
-		AutoProvision:         true,
-		AutoPrune:             true,
-		MinHealthy:            2,
-		MaxProfiles:           8,
-		ProvisionCooldownMin:  15,
+		Enabled:              true,
+		SoftTPS:              500,
+		ConsecutiveDegraded:  3,
+		RecoveryObservations: 2,
+		MinGenerationMs:      1000,
+		MinOutputTokens:      32,
+		AutoProvision:        true,
+		AutoPrune:            true,
+		MinHealthy:           2,
+		MaxProfiles:          8,
+		ProvisionCooldownMin: 15,
 		Probe: QualityProbeConfig{
-			Model:          "",
-			MaxTokens:      128,
-			TimeoutSeconds: 60,
+			Enabled:         true,
+			Model:           "grok-4",
+			MaxTokens:       128,
+			TimeoutSeconds:  60,
+			IntervalMinutes: 15,
 		},
 	}
 }
@@ -288,9 +300,6 @@ type PersistedState struct {
 	Auto     AutoSwitchConfig `json:"auto_switch"`
 	Quality  QualityConfig    `json:"quality,omitempty"`
 	Settings SettingsConfig   `json:"settings,omitempty"`
-	// AutoBoundAuths 记录由 xAI 降智守护自动绑定出口的 XAI 认证文件
-	// （auth_index → profile_id），关闭 xAI 降智守护时自动解绑恢复原状。
-	AutoBoundAuths map[string]string `json:"auto_bound_auths,omitempty"`
 }
 
 type EffectiveRoute struct {

@@ -247,17 +247,8 @@ func (m *Manager) ApplyRules() (ApplyRulesResult, error) {
 		return ApplyRulesResult{}, err
 	}
 	result := ApplyRulesResult{Total: len(entries.Files), Items: make([]ApplyItemResult, 0, len(entries.Files))}
-	autoBound := m.stateStore().AutoBoundAuths()
 	for _, entry := range entries.Files {
 		item := ApplyItemResult{AuthIndex: entry.AuthIndex, Name: entry.Name}
-		if _, auto := autoBound[entry.AuthIndex]; auto {
-			// xAI 降智守护自动绑定的 XAI 认证文件：保留自动绑定出口，不被规则覆盖。
-			item.Skipped = true
-			item.Error = "xAI 降智守护自动绑定出口，跳过应用"
-			result.Skipped++
-			result.Items = append(result.Items, item)
-			continue
-		}
 		if entry.RuntimeOnly || entry.AuthIndex == "" || !strings.HasSuffix(strings.ToLower(entry.Name), ".json") {
 			item.Skipped = true
 			item.Error = "runtime-only or no physical JSON auth file"

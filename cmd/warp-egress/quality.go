@@ -20,15 +20,14 @@ import (
 // xAI 降智守护（Quality Guard）：仅针对 xAI / Grok 输出降智。
 //
 // 原理：共享出口 IP 被打穿时，AI 生成的输出 Token/s 会异常飙升（表现为"模型变笨"）。
-// 插件被动观测 CPA usage 事件（任意 provider 都产生）的输出 token 数与耗时，
+// 插件被动观测 CPA usage 事件中的 xAI 输出 token 数与耗时，
 // 估算输出 TPS；TPS 超过阈值且连续多次则给对应出口打上降智标记（Degraded）。
-// 路由分流与自动切换会跳过被标记的出口；标记可通过连续健康观测或主动探测恢复。
-// 可选主动探测：新出口创建后先经该出口向任意 OpenAI 兼容端点发流式请求实测质量，
-// 降智的出口打记号不投入使用，避免轮换时用上没有质量保证的 IP。
+// xAI 认证文件保持跟随 CPA 全局代理，守护不会批量写入认证文件 proxy_url；
+// 后台只复用少量可用 xAI 账号，错峰实测备用出口并维护健康出口池。
 
 // 注意口径：本模块对外称为「xAI 降智守护」，仅针对 xAI / Grok 模型输出的
-// 降智检测（usage/流式观测都只统计 xAI 类请求），只影响 XAI 认证文件与
-// 其承载的出口；与其他 provider 的认证文件配置、分流规则无关。
+// 降智检测（usage/流式观测都只统计 xAI 类请求），只影响 xAI 全局出口的
+// 质量判定和自动切换；与其他 provider 的认证文件配置、分流规则无关。
 // 自动清理 = 清理降智代理（删除所有降智标记的托管出口，全部清理）；
 // max_profiles 仅作为自动补充的停止线。
 
@@ -294,6 +293,9 @@ func (m *Manager) applyQualityObservation(profileID string, tps float64, outToke
 	q := store.Quality()
 	profile.QualityTPS = tps
 	profile.QualityCheckedAt = time.Now()
+	profile.QualityClassification = class
+	profile.QualitySource = source
+	profile.QualityError = ""
 	stateChanged := false
 	switch class {
 	case "degraded":
@@ -347,7 +349,7 @@ func (m *Manager) scheduleQualitySave() {
 }
 
 // evaluateDegradedFailover 当前全局出口被打上降智标记时，
-// 立即切换到其他健康出口（异步，不阻塞 usage 热路径）。
+// 异步确认并切换到近期 xAI 实测健康的备用出口，不阻塞 usage 热路径。
 // 降智检测与降智切换一体：xAI 降智守护开启即生效，无需额外开关。
 func (m *Manager) evaluateDegradedFailover(profile *Profile) {
 	if profile == nil || !profile.Degraded {
@@ -363,6 +365,71 @@ func (m *Manager) evaluateDegradedFailover(profile *Profile) {
 	go func() {
 		_, _ = m.EvaluateAutoSwitch(false)
 	}()
+}
+
+func qualityObservationCurrent(profile *Profile, q QualityConfig, now time.Time) bool {
+	if profile == nil || profile.QualityCheckedAt.IsZero() {
+		return false
+	}
+	maxAge := time.Duration(q.Probe.IntervalMinutes) * time.Minute
+	if maxAge <= 0 {
+		maxAge = 15 * time.Minute
+	}
+	return !now.After(profile.QualityCheckedAt.Add(maxAge))
+}
+
+func qualityObservationFresh(profile *Profile, q QualityConfig, now time.Time) bool {
+	return profile != nil && profile.QualityClassification == "healthy" &&
+		qualityObservationCurrent(profile, q, now)
+}
+
+// switchToVerifiedQualityCandidate 仅服务于 xAI 降智故障转移。
+// 近期实测健康的备用出口可直接切换；结论过期的出口先做一次主动探测，
+// 确认健康后才接管全局流量。通用定时轮换与网络故障转移仍走原有逻辑。
+func (m *Manager) switchToVerifiedQualityCandidate(current *Profile, profiles []*Profile, auto AutoSwitchConfig) (*Profile, error) {
+	store := m.stateStore()
+	q := store.Quality()
+	start := -1
+	for index, profile := range profiles {
+		if current != nil && profile.ID == current.ID {
+			start = index
+			break
+		}
+	}
+	now := time.Now()
+	for offset := 1; offset <= len(profiles); offset++ {
+		index := (start + offset + len(profiles)) % len(profiles)
+		candidate := profiles[index]
+		if candidate == nil || !candidate.Healthy || candidate.Degraded || candidate.ProxyURL == "" ||
+			(candidate.Mode == ProfileModeManaged && !candidate.Running) ||
+			(current != nil && candidate.ID == current.ID) {
+			continue
+		}
+		if auto.RequireDifferentIP && current != nil && current.ExitIP != "" && candidate.ExitIP == current.ExitIP {
+			continue
+		}
+		verified := qualityObservationFresh(candidate, q, now)
+		if !verified {
+			// 刚确认失败或降智的候选在复检间隔内直接跳过，避免全局出口
+			// 持续降智时每个健康检查周期都重复消耗 xAI 探测用量。
+			if qualityObservationCurrent(candidate, q, now) {
+				continue
+			}
+			result, _ := m.ProbeProfile(candidate.ID)
+			verified = result.Classification == "healthy"
+		}
+		if !verified {
+			continue
+		}
+		if err := store.SetGlobalProfile(candidate.ID); err != nil {
+			return nil, err
+		}
+		if err := store.RecordSwitch(candidate.ID, "degraded"); err != nil {
+			return nil, err
+		}
+		return store.Profile(candidate.ID), nil
+	}
+	return nil, errors.New("no recently verified healthy xAI egress for automatic switch")
 }
 
 // probeQualityResult 主动探测结果（暴露给 UI 与管理 API）。
@@ -393,10 +460,38 @@ func httpClientThroughProfile(proxyURL string, timeout time.Duration) (*http.Cli
 
 // xaiAccount 主动探测复用的 CPA xAI 账号（从 host.auth.list/get 获取）。
 type xaiAccount struct {
+	AuthIndex   string
 	AccessToken string
 	BaseURL     string
 	Headers     map[string]string
 	Expired     bool
+}
+
+// 主动探测只读取 CPA 认证状态和认证内容，不保存认证文件，也不修改 proxy_url。
+// 注入点让测试可以验证大规模账号目录下只读取少量健康账号。
+var (
+	authListForProbe = func() (hostAuthListResponse, error) { return callHostAuthList() }
+	authGetForProbe  = func(authIndex string) (hostAuthGetResponse, error) { return callHostAuthGet(authIndex) }
+)
+
+func isXAIEntry(entry hostAuthFileEntry) bool {
+	provider := strings.ToLower(entry.Provider)
+	authType := strings.ToLower(entry.Type)
+	return strings.Contains(provider, "xai") || strings.Contains(provider, "grok") ||
+		strings.Contains(authType, "xai") || strings.Contains(authType, "grok")
+}
+
+// isHealthyXAIProbeEntry 只允许 CPA 当前可调度的 xAI 认证参与探测。
+// 空 status 兼容尚未返回运行状态的旧版 CLIProxyAPI；其他非 active 状态均跳过。
+func isHealthyXAIProbeEntry(entry hostAuthFileEntry, now time.Time) bool {
+	if !isXAIEntry(entry) || entry.AuthIndex == "" || entry.RuntimeOnly || entry.Disabled || entry.Unavailable {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(entry.Status))
+	if status != "" && status != "active" {
+		return false
+	}
+	return entry.NextRetryAfter.IsZero() || !now.Before(entry.NextRetryAfter)
 }
 
 // listXAIAccounts 从 CPA auth 目录筛选 xai/grok 类账号，
@@ -405,22 +500,17 @@ func listXAIAccounts(limit int) []xaiAccount {
 	if limit <= 0 {
 		limit = 8
 	}
-	entries, err := callHostAuthList()
+	entries, err := authListForProbe()
 	if err != nil {
 		return nil
 	}
 	out := make([]xaiAccount, 0, limit)
+	now := time.Now()
 	for _, entry := range entries.Files {
-		provider := strings.ToLower(entry.Provider)
-		authType := strings.ToLower(entry.Type)
-		if !strings.Contains(provider, "xai") && !strings.Contains(provider, "grok") &&
-			!strings.Contains(authType, "xai") && !strings.Contains(authType, "grok") {
+		if !isHealthyXAIProbeEntry(entry, now) {
 			continue
 		}
-		if entry.AuthIndex == "" {
-			continue
-		}
-		got, errGet := callHostAuthGet(entry.AuthIndex)
+		got, errGet := authGetForProbe(entry.AuthIndex)
 		if errGet != nil {
 			continue
 		}
@@ -437,6 +527,7 @@ func listXAIAccounts(limit int) []xaiAccount {
 			baseURL = "https://cli-chat-proxy.grok.com/v1"
 		}
 		account := xaiAccount{
+			AuthIndex:   entry.AuthIndex,
 			AccessToken: token,
 			BaseURL:     strings.TrimRight(baseURL, "/"),
 			Headers:     map[string]string{},
@@ -456,12 +547,41 @@ func listXAIAccounts(limit int) []xaiAccount {
 				}
 			}
 		}
+		if account.Expired {
+			continue
+		}
 		out = append(out, account)
 		if len(out) >= limit {
 			break
 		}
 	}
 	return out
+}
+
+const xaiProbeAccountCacheTTL = 5 * time.Minute
+
+// xaiAccountsForProbe 在多个备用出口之间短时复用同一小组健康探针账号。
+// host.auth.list 在数千账号时返回体较大，缓存可把目录扫描限制为每 5 分钟一次；
+// 账号出现认证/配额错误时会立即失效，下次探测重新从 CPA 健康状态筛选。
+func (m *Manager) xaiAccountsForProbe(limit int) []xaiAccount {
+	if limit <= 0 {
+		limit = 8
+	}
+	if len(m.qualityProbeAuths) > 0 && time.Since(m.qualityProbeAuthAt) < xaiProbeAccountCacheTTL {
+		if limit > len(m.qualityProbeAuths) {
+			limit = len(m.qualityProbeAuths)
+		}
+		return append([]xaiAccount(nil), m.qualityProbeAuths[:limit]...)
+	}
+	accounts := listXAIAccounts(limit)
+	m.qualityProbeAuths = append([]xaiAccount(nil), accounts...)
+	m.qualityProbeAuthAt = time.Now()
+	return accounts
+}
+
+func (m *Manager) invalidateXAIProbeAccounts() {
+	m.qualityProbeAuths = nil
+	m.qualityProbeAuthAt = time.Time{}
 }
 
 func applyGrokHeaders(req *http.Request, account xaiAccount) {
@@ -710,23 +830,8 @@ func (m *Manager) finishStreamTrack(requestID string) {
 	if class == "unknown" || class == "ignored" {
 		return
 	}
-	// 归因：全局出口模式（与被动 usage 的 fallback 一致）；
-	// 全局"不使用代理"时，若 xAI 降智守护自动绑定了 XAI 认证文件，
-	// 归到自动绑定出口（所有自动绑定指向同一健康托管出口）。
+	// xAI 认证文件统一跟随全局代理；未选择全局出口时不做质量归因。
 	profileID := m.stateStore().Rules().GlobalProfileID
-	if profileID == "" {
-		for _, proxy := range m.stateStore().AutoBoundAuths() {
-			for _, p := range m.stateStore().Profiles() {
-				if p.ProxyURL == proxy && !p.Degraded {
-					profileID = p.ID
-					break
-				}
-			}
-			if profileID != "" {
-				break
-			}
-		}
-	}
 	if profileID == "" {
 		return
 	}
@@ -765,7 +870,7 @@ func (m *Manager) startStreamTrackTTLCleanup(ctx context.Context) {
 }
 
 // ProbeProfile 主动质量探测：经该出口，复用 CPA 内 xAI 账号向 xAI 端点
-// 发一个流式请求，实测输出 TPS 并应用观测。账号类失败（401/403）换下一个
+// 发一个流式请求，实测输出 TPS 并应用观测。账号类失败（401/403/429）换下一个
 // 账号再试，不把账号问题误判为出口降智。
 func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 	store := m.stateStore()
@@ -782,14 +887,21 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 	if strings.TrimSpace(probe.Model) == "" {
 		return res, errors.New("probe model is required（xAI 模型名，如 grok-4）")
 	}
-	accounts := listXAIAccounts(8)
+	// 主动探测会消耗少量真实 xAI 用量；串行化可避免定时、手工与故障转移
+	// 同时触发，确保任一时刻最多只有一个出口在探测。
+	m.qualityProbeMu.Lock()
+	defer m.qualityProbeMu.Unlock()
+	accounts := m.xaiAccountsForProbe(8)
 	if len(accounts) == 0 {
-		return res, errors.New("没有可用的 CPA xAI 账号，无法主动探测（探测复用 xAI 账号）")
+		err := errors.New("没有可用的 CPA xAI 账号，无法主动探测（仅使用未禁用、未冷却的健康账号）")
+		m.recordQualityProbeError(profileID, err.Error())
+		return res, err
 	}
 	client, err := httpClientThroughProfile(profile.ProxyURL, time.Duration(probe.TimeoutSeconds)*time.Second)
 	if err != nil {
 		res.Classification = "error"
 		res.Error = err.Error()
+		m.recordQualityProbeError(profileID, res.Error)
 		return res, err
 	}
 	maxTokens := probe.MaxTokens
@@ -834,12 +946,15 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 			_ = response.Body.Close()
 			lastErr = fmt.Sprintf("probe upstream HTTP %d: %s", response.StatusCode, truncateString(string(body), 160))
 			res.DurationMs = time.Since(start).Milliseconds()
-			// 账号/配额类错误属于账号而非出口，换下一个账号再试。
-			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			// 账号、配额或限流错误属于探针账号而非出口，换下一个健康账号再试。
+			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden ||
+				response.StatusCode == http.StatusPaymentRequired || response.StatusCode == http.StatusTooManyRequests {
+				m.invalidateXAIProbeAccounts()
 				continue
 			}
 			res.Classification = "error"
 			res.Error = lastErr
+			m.recordQualityProbeError(profileID, res.Error)
 			return res, nil
 		}
 
@@ -930,11 +1045,66 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 		lastErr = "所有 xAI 账号探测失败"
 	}
 	res.Error = lastErr
+	m.recordQualityProbeError(profileID, res.Error)
 	return res, nil
 }
 
-// evaluateQualityTasks 由健康检查循环周期调用：自动清理 + 自动补充出口。
-// 清理先于补充执行，释放名额后补充判断更准确（避免降智/异常出口占位）。
+func (m *Manager) recordQualityProbeError(profileID, message string) {
+	store := m.stateStore()
+	profile := store.Profile(profileID)
+	if profile == nil {
+		return
+	}
+	profile.QualityTPS = 0
+	profile.QualityClassification = "error"
+	profile.QualitySource = "probe"
+	profile.QualityError = truncateString(message, 240)
+	profile.QualityCheckedAt = time.Now()
+	_ = store.UpdateProfileQuiet(profile)
+	m.scheduleQualitySave()
+}
+
+func qualityProbeInterval(q QualityConfig) time.Duration {
+	interval := time.Duration(q.Probe.IntervalMinutes) * time.Minute
+	if interval <= 0 {
+		return 15 * time.Minute
+	}
+	return interval
+}
+
+// selectQualityProbeCandidate 从连通正常的出口中选择最久未测的一个。
+// 每轮只返回一个出口，账号和出口数量再大也不会形成并发探测风暴。
+func selectQualityProbeCandidate(profiles []*Profile, interval time.Duration, now time.Time) *Profile {
+	var selected *Profile
+	for _, profile := range profiles {
+		if profile == nil || !profile.Healthy || profile.ProxyURL == "" ||
+			(profile.Mode == ProfileModeManaged && !profile.Running) {
+			continue
+		}
+		if !profile.QualityCheckedAt.IsZero() && now.Before(profile.QualityCheckedAt.Add(interval)) {
+			continue
+		}
+		if selected == nil || profile.QualityCheckedAt.Before(selected.QualityCheckedAt) {
+			selected = profile
+		}
+	}
+	return selected
+}
+
+// probeNextQualityProfile 在健康检查周期中错峰探测一个出口，维护少量近期实测
+// 健康的备用出口；不会扫描写入 xAI 认证文件，也不会为账号建立持久代理绑定。
+func (m *Manager) probeNextQualityProfile(q QualityConfig) {
+	if !q.Probe.Enabled || strings.TrimSpace(q.Probe.Model) == "" {
+		return
+	}
+	candidate := selectQualityProbeCandidate(m.stateStore().Profiles(), qualityProbeInterval(q), time.Now())
+	if candidate != nil {
+		_, _ = m.ProbeProfile(candidate.ID)
+	}
+}
+
+// evaluateQualityTasks 由健康检查循环周期调用：自动清理、自动补充，并错峰
+// 主动探测一个备用出口。清理先于补充执行，释放名额后补充判断更准确。
 func (m *Manager) evaluateQualityTasks() {
 	q := m.stateStore().Quality()
 	if !q.Enabled {
@@ -946,6 +1116,7 @@ func (m *Manager) evaluateQualityTasks() {
 	if q.AutoProvision {
 		_ = m.autoProvision(q)
 	}
+	m.probeNextQualityProfile(q)
 }
 
 // autoProvision 健康（连通 + 未降智）出口不足时自动补充一个托管 WARP 出口，
@@ -957,14 +1128,17 @@ func (m *Manager) autoProvision(q QualityConfig) error {
 	}
 	healthyManaged := 0
 	var viaID string
+	now := time.Now()
 	for _, p := range profiles {
 		if p.Mode != ProfileModeManaged {
 			continue
 		}
 		if p.Healthy && !p.Degraded {
-			healthyManaged++
 			if viaID == "" {
 				viaID = p.ID
+			}
+			if !q.Probe.Enabled || qualityObservationFresh(p, q, now) {
+				healthyManaged++
 			}
 		}
 	}
@@ -1010,9 +1184,6 @@ func (m *Manager) autoProvision(q QualityConfig) error {
 	m.provisionError = ""
 	m.mu.Unlock()
 	_ = m.CheckProfile(profile.ID)
-	if q.Probe.Enabled {
-		go func(id string) { _, _ = m.ProbeProfile(id) }(profile.ID)
-	}
 	return nil
 }
 
@@ -1051,20 +1222,13 @@ func (m *Manager) autoPrune(q QualityConfig) {
 			}
 		}
 	}
-	removed := false
 	for _, p := range profiles {
 		if p == nil || p.Mode != ProfileModeManaged || !p.Degraded || referenced[p.ID] {
 			continue
 		}
 		if err := m.DeleteProfile(p.ID); err == nil {
 			m.setLastError("自动清理降智代理: " + p.Name)
-			removed = true
 		}
-	}
-	if removed {
-		// 被清理出口承载的自动绑定认证文件立即改绑到健康出口，
-		// 避免在周期同步前流量打到已删除的端口。
-		_ = m.syncAutoBoundAuths()
 	}
 }
 

@@ -27,9 +27,11 @@ type Manager struct {
 
 	qualitySavePending bool
 	qualityTaskRunning bool
+	qualityProbeMu     sync.Mutex
+	qualityProbeAuths  []xaiAccount
+	qualityProbeAuthAt time.Time
 	lastProvisionAt    time.Time
 	provisionError     string
-	lastAutoBindSync   time.Time
 	// 被动 usage 诊断（供排查降智检测链路）
 	usageEvents       int
 	lastUsageProvider string
@@ -228,22 +230,7 @@ func (m *Manager) runQualityTasksOnce() {
 			m.mu.Unlock()
 		}()
 		m.evaluateQualityTasks()
-		m.syncAutoBoundAuthsIfDue()
 	}()
-}
-
-// syncAutoBoundAuthsIfDue 自动绑定 XAI 认证文件到健康出口（5 分钟节流）。
-func (m *Manager) syncAutoBoundAuthsIfDue() {
-	m.mu.Lock()
-	due := m.lastAutoBindSync.IsZero() || time.Since(m.lastAutoBindSync) >= 5*time.Minute
-	if due {
-		m.lastAutoBindSync = time.Now()
-	}
-	m.mu.Unlock()
-	if !due {
-		return
-	}
-	_ = m.syncAutoBoundAuths()
 }
 
 func (m *Manager) selectedProfileProxy() (string, error) {
@@ -310,8 +297,10 @@ func (m *Manager) buildAutoProvisionStatus(q QualityConfig) *autoProvisionStatus
 	if store == nil {
 		return status
 	}
+	now := time.Now()
 	for _, p := range store.Profiles() {
-		if p.Mode == ProfileModeManaged && p.Healthy && !p.Degraded {
+		if p.Mode == ProfileModeManaged && p.Healthy && !p.Degraded &&
+			(!q.Probe.Enabled || qualityObservationFresh(p, q, now)) {
 			status.HealthyManaged++
 		}
 	}
@@ -449,18 +438,7 @@ func (m *Manager) CreateProfile(req createProfileRequest) (*Profile, error) {
 		}
 	}
 	_ = m.CheckProfile(profile.ID)
-	m.maybeProbeNewProfile(profile.ID)
 	return m.stateStore().Profile(profile.ID), nil
-}
-
-// maybeProbeNewProfile 新出口创建后，若配置了主动质量探测，
-// 先经该出口实测质量：降智的出口会立即打记号，不参与路由。
-func (m *Manager) maybeProbeNewProfile(id string) {
-	q := m.stateStore().Quality()
-	if !q.Enabled || !q.Probe.Enabled {
-		return
-	}
-	go func() { _, _ = m.ProbeProfile(id) }()
 }
 
 // resolveRegisterProxy 把创建请求里的 register_via 解析为代理地址：
@@ -545,7 +523,6 @@ func (m *Manager) ImportProfile(req importProfileRequest) (*Profile, error) {
 		_ = m.stateStore().UpdateProfile(profile)
 	}
 	_ = m.CheckProfile(profile.ID)
-	m.maybeProbeNewProfile(profile.ID)
 	return m.stateStore().Profile(profile.ID), nil
 }
 
@@ -608,6 +585,10 @@ func (m *Manager) EvaluateAutoSwitch(force bool) (*Profile, error) {
 	profiles := store.Profiles()
 	if len(profiles) == 0 {
 		return nil, errors.New("no WARP profiles available")
+	}
+	quality := store.Quality()
+	if reason == "degraded" && quality.Probe.Enabled && strings.TrimSpace(quality.Probe.Model) != "" {
+		return m.switchToVerifiedQualityCandidate(current, profiles, auto)
 	}
 	start := -1
 	for index, profile := range profiles {
