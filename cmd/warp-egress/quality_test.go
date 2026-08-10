@@ -40,11 +40,79 @@ func TestClassifyQualityTPS(t *testing.T) {
 	}
 }
 
+func TestThinkingQualitySignalAndUsageFallbacks(t *testing.T) {
+	q := defaultQualityConfig()
+	if got := classifyQualitySignal(20, 200, false, q); got != "degraded" {
+		t.Fatalf("missing thinking=%q", got)
+	}
+	if got := classifyQualitySignal(20, 200, true, q); got != "healthy" {
+		t.Fatalf("thinking present=%q", got)
+	}
+	if got := classifyQualitySignal(20, q.MinOutputTokens-1, false, q); got != "ignored" {
+		t.Fatalf("short missing-thinking sample=%q", got)
+	}
+	if !recordHasThinking(map[string]any{"Detail": map[string]any{"reasoning_tokens": float64(3)}}) {
+		t.Fatal("reasoning_tokens should prove thinking")
+	}
+	if !recordHasThinking(map[string]any{"delta": map[string]any{"thinking_content": "step"}}) {
+		t.Fatal("thinking_content should prove thinking")
+	}
+}
+
+func TestProbeAccountAndTransportErrorsStaySeparated(t *testing.T) {
+	if !shouldRetryProbeAccount(true, 429, `{"error":"free-usage-exhausted"}`) {
+		t.Fatal("free quota exhaustion should switch probe account")
+	}
+	if shouldRetryProbeAccount(false, 401, "expired") {
+		t.Fatal("last account cannot be retried")
+	}
+	if !isProbeUnstableErr(assertError("unexpected EOF")) {
+		t.Fatal("broken stream should be treated as unstable egress")
+	}
+}
+
+func TestQualityPolicyMigrationEnablesNewGuardsOnce(t *testing.T) {
+	legacy := QualityConfig{Enabled: true, SoftTPS: 500, ConsecutiveDegraded: 3}
+	migrated := normalizeQualityConfig(legacy)
+	if migrated.PolicySchema != qualityPolicySchema || !migrated.ThinkingGuard ||
+		!migrated.ThinkingCrossVerify || !migrated.SoftCrossVerify {
+		t.Fatalf("legacy policy not migrated: %+v", migrated)
+	}
+	migrated.ThinkingGuard = false
+	migrated.ThinkingCrossVerify = false
+	migrated.SoftCrossVerify = false
+	normalizedAgain := normalizeQualityConfig(migrated)
+	if normalizedAgain.ThinkingGuard || normalizedAgain.ThinkingCrossVerify || normalizedAgain.SoftCrossVerify {
+		t.Fatalf("explicit schema-2 switches were overwritten: %+v", normalizedAgain)
+	}
+}
+
+func TestXAIExtensionDefaultsToDisabled(t *testing.T) {
+	if q := defaultQualityConfig(); q.Enabled {
+		t.Fatal("optional xAI extension must not intercept core routing by default")
+	}
+}
+
+type assertError string
+
+func (e assertError) Error() string { return string(e) }
+
 func newTestManager(t *testing.T) *Manager {
 	t.Helper()
 	manager := NewManager()
 	manager.cfg = defaultConfig()
 	manager.store = NewStateStore(t.TempDir())
+	// 旧回归用例验证 v0.6 的 TPS + 普通全局出口语义；新路由与 thinking
+	// 行为由本文件和 egress_router_test.go 的专门用例覆盖。
+	quality := manager.store.Quality()
+	quality.Enabled = true
+	quality.Route.Mode = XAIRouteModeFollowGlobal
+	quality.ThinkingGuard = false
+	quality.ThinkingCrossVerify = false
+	quality.SoftCrossVerify = false
+	if err := manager.store.SetQuality(quality); err != nil {
+		t.Fatal(err)
+	}
 	return manager
 }
 

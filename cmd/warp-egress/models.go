@@ -168,13 +168,16 @@ type Profile struct {
 	UpdatedAt   time.Time   `json:"updated_at"`
 	// xAI 降智守护：出口被观测/探测到输出 TPS 异常（降智）时标记，
 	// 路由分流与自动切换会跳过被标记的出口。
-	Degraded         bool      `json:"degraded,omitempty"`
-	DegradedReason   string    `json:"degraded_reason,omitempty"`
-	DegradedAt       time.Time `json:"degraded_at,omitempty"`
-	QualityTPS       float64   `json:"quality_tps,omitempty"`
-	QualityStrikes   int       `json:"quality_strikes,omitempty"`
-	QualityRecovery  int       `json:"quality_recovery,omitempty"`
-	QualityCheckedAt time.Time `json:"quality_checked_at,omitempty"`
+	Degraded       bool      `json:"degraded,omitempty"`
+	DegradedReason string    `json:"degraded_reason,omitempty"`
+	DegradedAt     time.Time `json:"degraded_at,omitempty"`
+	QualityTPS     float64   `json:"quality_tps,omitempty"`
+	QualityStrikes int       `json:"quality_strikes,omitempty"`
+	// QualityThinkingStrikes 单独累计“有足够输出但缺少 thinking”样本，
+	// 避免与 TPS 异常计数混在一起后由不同质量信号误触发隔离。
+	QualityThinkingStrikes int       `json:"quality_thinking_strikes,omitempty"`
+	QualityRecovery        int       `json:"quality_recovery,omitempty"`
+	QualityCheckedAt       time.Time `json:"quality_checked_at,omitempty"`
 	// QualityClassification / QualitySource 记录最近一次 xAI 质量结论及来源，
 	// 让全局降智切换只选择近期主动探测或真实请求确认健康的备用出口。
 	QualityClassification string `json:"quality_classification,omitempty"`
@@ -226,44 +229,79 @@ type QualityProbeConfig struct {
 	IntervalMinutes int    `json:"interval_minutes"`
 }
 
+const (
+	XAIRouteModeIndependent  = "independent"
+	XAIRouteModeFollowGlobal = "follow_global"
+	XAIRouteModeDirect       = "direct"
+	qualityPolicySchema      = 2
+)
+
+// XAIRouteConfig 只决定 xAI 请求通过插件本地中继后的出口。
+// independent 与普通 GlobalProfileID 完全分离；无可用出口时拒绝连接，
+// 以保证“xAI 只走代理”不会在异常时静默退回服务器直连。
+type XAIRouteConfig struct {
+	Mode            string   `json:"mode"`
+	ActiveProfileID string   `json:"active_profile_id,omitempty"`
+	Hosts           []string `json:"hosts,omitempty"`
+}
+
 // QualityConfig xAI 降智守护策略（仅针对 xAI / Grok 输出降智）：
 // 被动观测 CPA usage 事件中的输出 token 数与耗时，估算输出 TPS；
 // TPS 异常高说明出口共享 IP 被打穿（对 AI 生成表现为"降智"），
 // 连续多次则给该出口打降智标记，路由分流自动跳过。
 type QualityConfig struct {
-	Enabled              bool               `json:"enabled"`
-	SoftTPS              float64            `json:"soft_tps"`
-	ConsecutiveDegraded  int                `json:"consecutive_degraded"`
-	RecoveryObservations int                `json:"recovery_observations"`
-	MinGenerationMs      int64              `json:"min_generation_ms"`
-	MinOutputTokens      int64              `json:"min_output_tokens"`
-	AutoProvision        bool               `json:"auto_provision"`
-	AutoPrune            bool               `json:"auto_prune"`
-	MinHealthy           int                `json:"min_healthy"`
-	MaxProfiles          int                `json:"max_profiles"`
-	ProvisionCooldownMin int                `json:"provision_cooldown_minutes"`
-	Probe                QualityProbeConfig `json:"probe"`
+	PolicySchema int `json:"policy_schema,omitempty"`
+	// Enabled 是整个 xAI 出口守护扩展的总开关，不只是检测开关。
+	// false 时域名路由、主动探测、自动补充/清理和独立切换均不接管核心行为。
+	Enabled                    bool               `json:"enabled"`
+	SoftTPS                    float64            `json:"soft_tps"`
+	ConsecutiveDegraded        int                `json:"consecutive_degraded"`
+	ThinkingGuard              bool               `json:"thinking_guard"`
+	ConsecutiveMissingThinking int                `json:"consecutive_missing_thinking"`
+	ThinkingCrossVerify        bool               `json:"thinking_cross_verify"`
+	SoftCrossVerify            bool               `json:"soft_cross_verify"`
+	RecoveryObservations       int                `json:"recovery_observations"`
+	MinGenerationMs            int64              `json:"min_generation_ms"`
+	MinOutputTokens            int64              `json:"min_output_tokens"`
+	AutoProvision              bool               `json:"auto_provision"`
+	AutoPrune                  bool               `json:"auto_prune"`
+	MinHealthy                 int                `json:"min_healthy"`
+	MaxProfiles                int                `json:"max_profiles"`
+	ProvisionCooldownMin       int                `json:"provision_cooldown_minutes"`
+	Probe                      QualityProbeConfig `json:"probe"`
+	Route                      XAIRouteConfig     `json:"route"`
 }
 
 func defaultQualityConfig() QualityConfig {
 	return QualityConfig{
-		Enabled:              true,
-		SoftTPS:              500,
-		ConsecutiveDegraded:  3,
-		RecoveryObservations: 2,
-		MinGenerationMs:      1000,
-		MinOutputTokens:      32,
-		AutoProvision:        true,
-		AutoPrune:            true,
-		MinHealthy:           2,
-		MaxProfiles:          8,
-		ProvisionCooldownMin: 15,
+		PolicySchema: qualityPolicySchema,
+		// xAI 守护是可选拓展，新安装默认关闭；开启后才注册目标接管、
+		// 主动探测和独立出口切换行为。
+		Enabled:                    false,
+		SoftTPS:                    500,
+		ConsecutiveDegraded:        3,
+		ThinkingGuard:              true,
+		ConsecutiveMissingThinking: 1,
+		ThinkingCrossVerify:        true,
+		SoftCrossVerify:            true,
+		RecoveryObservations:       2,
+		MinGenerationMs:            1000,
+		MinOutputTokens:            32,
+		AutoProvision:              true,
+		AutoPrune:                  true,
+		MinHealthy:                 2,
+		MaxProfiles:                8,
+		ProvisionCooldownMin:       15,
 		Probe: QualityProbeConfig{
 			Enabled:         true,
 			Model:           "grok-4",
 			MaxTokens:       128,
 			TimeoutSeconds:  60,
 			IntervalMinutes: 15,
+		},
+		Route: XAIRouteConfig{
+			Mode:  XAIRouteModeIndependent,
+			Hosts: []string{"cli-chat-proxy.grok.com", "api.x.ai"},
 		},
 	}
 }
