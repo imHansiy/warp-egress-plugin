@@ -56,7 +56,7 @@ jobs:
           esac
 
       - name: Run tests
-        run: go test ./...
+        run: go test -timeout 5m ./...
 
       - name: Validate registry files
         run: python3 scripts/validate-registry.py
@@ -112,7 +112,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test ./...
+        run: go test -timeout 5m ./...
 
       - name: Download embedded tools for target platform
         run: GOOS_ARCH=darwin_${{ matrix.goarch }} ./scripts/download-tools.sh
