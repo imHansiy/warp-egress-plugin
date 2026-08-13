@@ -250,6 +250,9 @@ func TestPanelHTMLContainsSimplifiedWorkflows(t *testing.T) {
 		"id=\"extrasOverlay\"",
 		"id=\"settingsOverlay\"",
 		"id=\"connectOverlay\"",
+		"id=\"qualityHardTPS\"",
+		"id=\"qualityConsecutiveErrors\"",
+		"return {policy_schema:4,",
 	}
 	for _, marker := range required {
 		if !strings.Contains(panelHTML, marker) {
@@ -275,6 +278,20 @@ func TestPluginVersionFormat(t *testing.T) {
 		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '.' || c == '-' || c == '+' || c == '_') {
 			t.Fatalf("pluginVersion %q contains invalid character %q", pluginVersion, string(c))
 		}
+	}
+}
+
+func TestRequestInterceptorAfterCallbackIsAccepted(t *testing.T) {
+	raw, err := handlePluginMethod("request.intercept_after", []byte(`{"RequestID":"req-1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response envelope
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.OK {
+		t.Fatalf("request.intercept_after must be accepted when request_interceptor is advertised: %s", raw)
 	}
 }
 

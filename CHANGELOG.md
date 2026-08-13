@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## 0.8.0
+
+- 补齐 xAI 出口守护状态机：新增 `hard_tps` 单次立即隔离、`consecutive_errors` 探测错误累计，以及 `min_healthy` 隔离抑制保护。
+- 统一 xAI Token 口径：completion/output 已包含 reasoning 时不重复相加，仅有 reasoning 明细时仍可用于 TPS 证据；`total_tokens` 不进入分子。
+- 面板升级到质量策略 schema 4，显示软/硬阈值、探测错误次数与 `suppressed` / 硬隔离状态；旧策略自动补齐默认值。
+- 账号过期、额度耗尽与暂无可调度探针账号继续只记诊断，不会累计为出口错误。
+- 修复流式 xAI 请求的误报：usage 未提供 thinking 字段时按“未知”处理；结束帧中的 reasoning token 可以纠正早到但字段不完整的结论，不再被请求去重丢弃。
+- 交叉验证改为有界任务：等待探测槽位也计入总超时，超时后退出 `verifying`、保留当前出口，并允许完整流式证据取消无效复核。
+- 插件重载时会清理上次遗留的 `verifying` 状态，避免中断的交叉验证让出口长期卡在待确认状态。
+
 ## 0.7.0
 
 - 将 xAI 降智守护重构为默认关闭、可独立移除的「xAI 出口守护扩展」，核心 SOCKS 中继只保留通用目标路由接口，不再绑定 xAI / Grok 业务判断。

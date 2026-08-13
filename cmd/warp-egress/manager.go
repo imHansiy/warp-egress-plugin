@@ -27,11 +27,13 @@ type Manager struct {
 
 	qualitySavePending   bool
 	qualityTaskRunning   bool
-	qualityProbeMu       sync.Mutex
+	qualityProbeSlot     chan struct{}
 	qualityProbeAuths    []xaiAccount
 	qualityProbeAuthAt   time.Time
 	qualityCrossVerifyMu sync.Mutex
-	qualityCrossVerify   map[string]bool
+	qualityCrossVerify   map[string]*qualityCrossVerifyTask
+	qualityObservationMu sync.Mutex
+	qualityObserved      map[string]qualityObservationClaim
 	lastProvisionAt      time.Time
 	provisionError       string
 	// 被动 usage 诊断（供排查降智检测链路）
@@ -56,7 +58,12 @@ type Manager struct {
 }
 
 func NewManager() *Manager {
-	return &Manager{processes: map[string]*managedProcess{}, qualityCrossVerify: map[string]bool{}}
+	return &Manager{
+		processes:          map[string]*managedProcess{},
+		qualityProbeSlot:   make(chan struct{}, 1),
+		qualityCrossVerify: map[string]*qualityCrossVerifyTask{},
+		qualityObserved:    map[string]qualityObservationClaim{},
+	}
 }
 
 func (m *Manager) Configure(raw []byte) error {

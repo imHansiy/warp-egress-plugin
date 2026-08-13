@@ -64,6 +64,11 @@ func classifyQualitySignal(tps float64, outputTokens int64, hasThinking bool, q 
 	if q.MinOutputTokens > 0 && outputTokens < q.MinOutputTokens {
 		return "ignored"
 	}
+	// 硬阈值代表输出速度已经远离正常生成区间，直接隔离比等待连续
+	// 软信号更能避免后续账号继续落到同一个异常出口。
+	if q.HardTPS > 0 && tps >= q.HardTPS {
+		return "hard"
+	}
 	if q.ThinkingGuard && !hasThinking {
 		return "degraded"
 	}
@@ -77,10 +82,25 @@ func usageTokens(detail map[string]any) int64 {
 	if detail == nil {
 		return 0
 	}
+	// xAI 的 output/completion 已包含 reasoning，取最大权威输出字段而不相加；
+	// 某些 CPA 版本只保留 reasoning 明细，此时仍把它作为最小输出证据。
+	// total_tokens 同时包含输入，不能进入 TPS 分子。
 	best := int64(0)
-	for _, key := range []string{"OutputTokens", "output_tokens", "outputTokens", "CompletionTokens", "completion_tokens", "completionTokens", "ReasoningTokens", "reasoning_tokens", "reasoningTokens", "TotalTokens", "total_tokens"} {
-		if v := anyInt64(detail[key]); v > best {
-			best = v
+	for _, key := range []string{
+		"OutputTokens", "output_tokens", "outputTokens",
+		"CompletionTokens", "completion_tokens", "completionTokens",
+		"ReasoningTokens", "reasoning_tokens", "reasoningTokens",
+	} {
+		if value := anyInt64(detail[key]); value > best {
+			best = value
+		}
+	}
+	for _, key := range []string{"completion_tokens_details", "completionTokensDetails", "CompletionTokensDetails", "output_tokens_details", "outputTokensDetails", "OutputTokensDetails"} {
+		nested, _ := detail[key].(map[string]any)
+		for _, reasoningKey := range []string{"reasoning_tokens", "reasoningTokens", "ReasoningTokens"} {
+			if value := anyInt64(nested[reasoningKey]); value > best {
+				best = value
+			}
 		}
 	}
 	return best
@@ -285,7 +305,61 @@ func (m *Manager) HandleUsage(record map[string]any) error {
 	tps := computeTPS(outTokens, durationMs, firstTokenMs, q.MinGenerationMs)
 	hasThinking := recordHasThinking(record)
 	class := classifyQualitySignal(tps, outTokens, hasThinking, q)
+	if q.ThinkingGuard && !hasThinking {
+		// CPA usage 会把下游未上报的 reasoning 字段序列化为零值，无法区分
+		// “明确没有推理”和“聚合记录没保留推理明细”。因此 usage 只负责 TPS；
+		// missing-thinking 仅由完整流式结束帧或主动探针判定。
+		class = classifyQualityTPS(tps, outTokens, q)
+		if class == "healthy" {
+			return nil
+		}
+		hasThinking = true
+	}
+	if class != "unknown" && class != "ignored" {
+		requestID := recordString(record, "RequestID", "request_id", "requestId")
+		if !m.claimQualityObservation(requestID, hasThinking) {
+			return nil
+		}
+	}
 	return m.applyQualitySignal(profile.ID, tps, outTokens, hasThinking, class, "passive")
+}
+
+const qualityObservationDedupTTL = 5 * time.Minute
+
+type qualityObservationClaim struct {
+	ObservedAt  time.Time
+	HasThinking bool
+}
+
+// claimQualityObservation 让 stream 与 usage 两条兼容链路共享质量结论。
+// 相同证据只累计一次；后到的结束帧若补充了 reasoning token，则允许它纠正
+// 早到但字段不完整的 usage，避免把真实推理响应误判为缺少 thinking。
+func (m *Manager) claimQualityObservation(requestID string, hasThinking bool) bool {
+	if strings.TrimSpace(requestID) == "" {
+		return true
+	}
+	now := time.Now()
+	m.qualityObservationMu.Lock()
+	defer m.qualityObservationMu.Unlock()
+	if m.qualityObserved == nil {
+		m.qualityObserved = map[string]qualityObservationClaim{}
+	}
+	if previous, exists := m.qualityObserved[requestID]; exists {
+		if hasThinking && !previous.HasThinking {
+			previous.HasThinking = true
+			previous.ObservedAt = now
+			m.qualityObserved[requestID] = previous
+			return true
+		}
+		return false
+	}
+	for id, observation := range m.qualityObserved {
+		if now.Sub(observation.ObservedAt) > qualityObservationDedupTTL {
+			delete(m.qualityObserved, id)
+		}
+	}
+	m.qualityObserved[requestID] = qualityObservationClaim{ObservedAt: now, HasThinking: hasThinking}
+	return true
 }
 
 // applyQualityObservation 合并一次质量观测到 profile：
@@ -293,6 +367,34 @@ func (m *Manager) HandleUsage(record map[string]any) error {
 // healthy 连续恢复 → 清除标记。常规统计走防抖落盘，避免高频写盘。
 func (m *Manager) applyQualityObservation(profileID string, tps float64, outTokens int64, class, source string) error {
 	return m.applyQualitySignal(profileID, tps, outTokens, true, class, source)
+}
+
+// isolateQualityProfile 把质量异常出口移出 xAI 活动池。隔离前按实际可路由
+// 口径统计其余出口；如果继续隔离会让可用出口少于策略下限，则保留当前出口
+// 并把结论标成 suppressed，避免一轮异常观测阻断全部 xAI 流量。
+func (m *Manager) isolateQualityProfile(profile *Profile, reason string, q QualityConfig) bool {
+	if profile == nil {
+		return false
+	}
+	if profile.Degraded {
+		profile.DegradedReason = reason
+		return false
+	}
+	remaining := 0
+	for _, candidate := range m.stateStore().Profiles() {
+		if candidate.ID != profile.ID && profileUsableForXAIRoute(candidate) {
+			remaining++
+		}
+	}
+	if q.MinHealthy > 0 && remaining < q.MinHealthy {
+		profile.QualityClassification = "suppressed"
+		profile.QualityError = fmt.Sprintf("最低健康出口保护：隔离后仅剩 %d 个可用出口，策略要求至少 %d 个", remaining, q.MinHealthy)
+		return false
+	}
+	profile.Degraded = true
+	profile.DegradedAt = time.Now()
+	profile.DegradedReason = reason
+	return true
 }
 
 func (m *Manager) applyQualitySignal(profileID string, tps float64, outTokens int64, hasThinking bool, class, source string) error {
@@ -313,14 +415,26 @@ func (m *Manager) applyQualitySignal(profileID string, tps float64, outTokens in
 	stateChanged := false
 	crossVerify := false
 	switch class {
+	case "hard":
+		profile.QualityRecovery = 0
+		profile.QualityStrikes = 0
+		profile.QualityErrorStrikes = 0
+		profile.QualityThinkingStrikes = 0
+		stateChanged = m.isolateQualityProfile(profile, fmt.Sprintf("输出 TPS 命中硬阈值（%.1f token/s，%s）", tps, source), q)
 	case "degraded":
 		profile.QualityRecovery = 0
+		profile.QualityErrorStrikes = 0
 		missingThinking := q.ThinkingGuard && !hasThinking
 		if missingThinking {
 			// thinking 缺失与 TPS 异常分别累计；交叉验证可能使用另一个
 			// 探针账号，但只验证同一个出口，不把账号结论混成新样本。
 			profile.QualityThinkingStrikes++
 			profile.QualityStrikes = 0
+			// 节点已经隔离时仍刷新为最近一次可验证的降智证据，避免面板
+			// 长期显示早先的超时或其他已过时原因。
+			if profile.Degraded {
+				profile.DegradedReason = fmt.Sprintf("最近一次响应缺少 thinking_content（%s）", source)
+			}
 			threshold := q.ConsecutiveMissingThinking
 			if threshold <= 0 {
 				threshold = 1
@@ -331,31 +445,34 @@ func (m *Manager) applyQualitySignal(profileID string, tps float64, outTokens in
 					profile.QualityClassification = "verifying"
 					profile.QualityError = "响应缺少 thinking，等待主动交叉验证"
 				} else {
-					profile.Degraded = true
-					profile.DegradedAt = time.Now()
-					profile.DegradedReason = fmt.Sprintf("连续 %d 次响应缺少 thinking_content（%s）", profile.QualityThinkingStrikes, source)
-					stateChanged = true
+					stateChanged = m.isolateQualityProfile(profile, fmt.Sprintf("连续 %d 次响应缺少 thinking_content（%s）", profile.QualityThinkingStrikes, source), q)
 				}
 			}
 		} else {
 			profile.QualityThinkingStrikes = 0
 			profile.QualityStrikes++
+			if profile.Degraded {
+				profile.DegradedReason = fmt.Sprintf("最近一次高输出 TPS（%.1f token/s，%s）", tps, source)
+			}
 			if !profile.Degraded && profile.QualityStrikes >= q.ConsecutiveDegraded {
 				if q.SoftCrossVerify && source != "probe" {
 					crossVerify = true
 					profile.QualityClassification = "verifying"
 					profile.QualityError = "TPS 异常，等待主动交叉验证"
 				} else {
-					profile.Degraded = true
-					profile.DegradedAt = time.Now()
-					profile.DegradedReason = fmt.Sprintf("连续 %d 次高输出 TPS（%.1f token/s，%s）", profile.QualityStrikes, tps, source)
-					stateChanged = true
+					stateChanged = m.isolateQualityProfile(profile, fmt.Sprintf("连续 %d 次高输出 TPS（%.1f token/s，%s）", profile.QualityStrikes, tps, source), q)
 				}
 			}
 		}
 	case "healthy":
 		profile.QualityStrikes = 0
+		profile.QualityErrorStrikes = 0
 		profile.QualityThinkingStrikes = 0
+		if source != "probe" {
+			// 同一真实请求的结束帧补齐 reasoning 证据后，先前 usage 触发的
+			// 交叉验证已无必要，立即取消以避免额外 token 消耗和迟到覆盖。
+			m.cancelQualityCrossVerify(profileID)
+		}
 		if profile.Degraded {
 			profile.QualityRecovery++
 			if profile.QualityRecovery >= q.RecoveryObservations {
@@ -382,27 +499,76 @@ func (m *Manager) applyQualitySignal(profileID string, tps float64, outTokens in
 	return nil
 }
 
+type qualityCrossVerifyTask struct {
+	cancel context.CancelFunc
+}
+
+func qualityCrossVerifyTimeout(q QualityConfig) time.Duration {
+	timeout := time.Duration(q.Probe.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		return 60 * time.Second
+	}
+	return timeout
+}
+
 // scheduleQualityCrossVerify 同一出口最多挂一个复测任务，避免连续真实请求
-// 同时触发多次主动模型探测和额外 Token 消耗。
+// 同时触发多次主动模型探测和额外 Token 消耗。probe timeout 是复核的
+// 总预算，也包含等待其他探测释放串行槽位的时间。
 func (m *Manager) scheduleQualityCrossVerify(profileID string) {
+	timeout := qualityCrossVerifyTimeout(m.stateStore().Quality())
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	task := &qualityCrossVerifyTask{cancel: cancel}
 	m.qualityCrossVerifyMu.Lock()
 	if m.qualityCrossVerify == nil {
-		m.qualityCrossVerify = map[string]bool{}
+		m.qualityCrossVerify = map[string]*qualityCrossVerifyTask{}
 	}
-	if m.qualityCrossVerify[profileID] {
+	if m.qualityCrossVerify[profileID] != nil {
 		m.qualityCrossVerifyMu.Unlock()
+		cancel()
 		return
 	}
-	m.qualityCrossVerify[profileID] = true
+	m.qualityCrossVerify[profileID] = task
 	m.qualityCrossVerifyMu.Unlock()
 	go func() {
 		defer func() {
+			cancel()
 			m.qualityCrossVerifyMu.Lock()
-			delete(m.qualityCrossVerify, profileID)
+			if m.qualityCrossVerify[profileID] == task {
+				delete(m.qualityCrossVerify, profileID)
+			}
 			m.qualityCrossVerifyMu.Unlock()
 		}()
-		_, _ = m.ProbeProfile(profileID)
+		_, err := m.probeProfile(ctx, profileID)
+		if errors.Is(err, context.DeadlineExceeded) {
+			m.recordQualityCrossVerifyTimeout(profileID, timeout)
+		}
 	}()
+}
+
+func (m *Manager) cancelQualityCrossVerify(profileID string) {
+	m.qualityCrossVerifyMu.Lock()
+	task := m.qualityCrossVerify[profileID]
+	m.qualityCrossVerifyMu.Unlock()
+	if task != nil {
+		task.cancel()
+	}
+}
+
+func (m *Manager) recordQualityCrossVerifyTimeout(profileID string, timeout time.Duration) {
+	store := m.stateStore()
+	profile := store.Profile(profileID)
+	if profile == nil || profile.QualityClassification != "verifying" {
+		return
+	}
+	profile.QualityClassification = "error"
+	profile.QualitySource = "probe"
+	profile.QualityError = fmt.Sprintf("主动交叉验证超时（%s 内未完成），保留当前出口", timeout)
+	profile.QualityCheckedAt = time.Now()
+	// 超时没有提供出口降智证据，清除本次临时信号，后续真实请求重新判断。
+	profile.QualityStrikes = 0
+	profile.QualityThinkingStrikes = 0
+	_ = store.UpdateProfileQuiet(profile)
+	m.scheduleQualitySave()
 }
 
 func (m *Manager) scheduleQualitySave() {
@@ -462,15 +628,33 @@ func mapHasThinkingContent(data map[string]any) bool {
 	return false
 }
 
+func mapHasReasoningTokens(data map[string]any) bool {
+	if data == nil {
+		return false
+	}
+	if anyInt64(data["reasoning_tokens"]) > 0 || anyInt64(data["reasoningTokens"]) > 0 {
+		return true
+	}
+	// OpenAI 兼容响应把推理 token 放在 completion_tokens_details 中；
+	// CPA 的不同版本会保留 snake_case、camelCase 或 Go 字段名。
+	for _, key := range []string{"completion_tokens_details", "completionTokensDetails", "CompletionTokensDetails"} {
+		details, _ := data[key].(map[string]any)
+		if anyInt64(details["reasoning_tokens"]) > 0 || anyInt64(details["reasoningTokens"]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // recordHasThinking 兼容 CPA usage 事件只带 usage 数字、只带响应嵌套字段，
 // 或显式 has_thinking 标记的不同版本。
 func recordHasThinking(record map[string]any) bool {
-	if mapHasThinkingContent(record) {
+	if mapHasThinkingContent(record) || mapHasReasoningTokens(record) {
 		return true
 	}
 	for _, key := range []string{"Detail", "detail", "Message", "message", "Response", "response", "Delta", "delta", "Usage", "usage"} {
 		nested, _ := record[key].(map[string]any)
-		if mapHasThinkingContent(nested) || anyInt64(nested["reasoning_tokens"]) > 0 || anyInt64(nested["reasoningTokens"]) > 0 {
+		if mapHasThinkingContent(nested) || mapHasReasoningTokens(nested) {
 			return true
 		}
 	}
@@ -486,7 +670,7 @@ func recordHasThinking(record map[string]any) bool {
 			}
 		}
 	}
-	return anyInt64(record["reasoning_tokens"]) > 0 || anyInt64(record["reasoningTokens"]) > 0
+	return false
 }
 
 func qualityObservationCurrent(profile *Profile, q QualityConfig, now time.Time) bool {
@@ -676,9 +860,10 @@ func isAccountQuotaExhausted(status int, body string) bool {
 }
 
 func shouldRetryProbeAccount(hasNext bool, status int, body string) bool {
-	if !hasNext {
-		return false
-	}
+	return hasNext && isProbeAccountError(status, body)
+}
+
+func isProbeAccountError(status int, body string) bool {
 	if isAccountQuotaExhausted(status, body) {
 		return true
 	}
@@ -1056,6 +1241,11 @@ func extractStreamChunkMetrics(body []byte) (done bool, chars int, hasThinking b
 				}
 			}
 		}
+		if usage, ok := chunk["usage"].(map[string]any); ok && mapHasReasoningTokens(usage) {
+			// 有些 xAI 流只在结束帧的 usage 中给出 reasoning token，
+			// 即使没有输出 reasoning_content，也属于正常 thinking 响应。
+			hasThinking = true
+		}
 		// xAI 原生 Responses 事件（未翻译时）：delta 为字符串。
 		if t, ok := chunk["type"].(string); ok && (t == "response.output_text.delta" || t == "response.output_reasoning_text.delta") {
 			if textPart, ok := chunk["delta"].(string); ok && textPart != "" {
@@ -1117,6 +1307,9 @@ func (m *Manager) finishStreamTrack(requestID string) {
 	if class == "unknown" || class == "ignored" {
 		return
 	}
+	if !m.claimQualityObservation(requestID, track.hasThinking) {
+		return
+	}
 	// 账号不绑定代理时，按独立/follow_global 的真实活动出口归因。
 	profileID := m.xaiQualityProfileID()
 	if profileID == "" {
@@ -1160,6 +1353,13 @@ func (m *Manager) startStreamTrackTTLCleanup(ctx context.Context) {
 // 发一个流式请求，实测输出 TPS 并应用观测。账号类失败（401/403/429）换下一个
 // 账号再试，不把账号问题误判为出口降智。
 func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
+	return m.probeProfile(context.Background(), profileID)
+}
+
+func (m *Manager) probeProfile(ctx context.Context, profileID string) (probeQualityResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	store := m.stateStore()
 	profile := store.Profile(profileID)
 	if profile == nil {
@@ -1172,16 +1372,24 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 		return res, errors.New("quality probe is disabled")
 	}
 	if strings.TrimSpace(probe.Model) == "" {
-		return res, errors.New("probe model is required（xAI 模型名，如 grok-4）")
+		return res, errors.New("probe model is required（xAI 模型名，如 grok-4.6）")
 	}
 	// 主动探测会消耗少量真实 xAI 用量；串行化可避免定时、手工与故障转移
-	// 同时触发，确保任一时刻最多只有一个出口在探测。
-	m.qualityProbeMu.Lock()
-	defer m.qualityProbeMu.Unlock()
+	// 同时触发，确保任一时刻最多只有一个出口在探测；交叉验证等待槽位时
+	// 也服从总超时，不能永久停在 verifying。
+	select {
+	case m.qualityProbeSlot <- struct{}{}:
+		defer func() { <-m.qualityProbeSlot }()
+	case <-ctx.Done():
+		return res, ctx.Err()
+	}
 	accounts := m.xaiAccountsForProbe(8)
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
 	if len(accounts) == 0 {
 		err := errors.New("没有可用的 CPA xAI 账号，无法主动探测（仅使用未禁用、未冷却的健康账号）")
-		m.recordQualityProbeError(profileID, err.Error())
+		m.recordQualityProbeUnavailable(profileID, err.Error())
 		return res, err
 	}
 	client, err := httpClientThroughProfile(profile.ProxyURL, time.Duration(probe.TimeoutSeconds)*time.Second)
@@ -1197,23 +1405,37 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"model": probe.Model,
+		// 探针只需要稳定产生一小段可计量输出。限制为四个短句，避免推理模型因
+		// “详细说明”和过长句数持续规划，直到超时才被误判成出口降智。
 		"messages": []map[string]string{
-			{"role": "user", "content": "Write a detailed technical explanation of how TCP slow start works, at least 12 sentences, plain text only."},
+			{"role": "user", "content": "Explain TCP slow start in exactly four short sentences, plain text only."},
 		},
-		"stream":      true,
-		"max_tokens":  maxTokens,
-		"temperature": 0.7,
+		"stream": true,
+		// Chat Completions 流默认可能不携带最终 usage；显式请求后才能用隐藏的
+		// reasoning_tokens 区分“没有公开思维文本”和“模型确实没有推理”。
+		"stream_options": map[string]bool{"include_usage": true},
+		"max_tokens":     maxTokens,
+		"temperature":    0.7,
 	})
 	var lastErr string
+	lastErrorCounts := false
+	noOutputRetryUsed := false
 	for accountIndex, account := range accounts {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		if account.Expired {
 			lastErr = "xAI 账号已过期"
+			lastErrorCounts = false
 			continue
 		}
-		request, errReq := http.NewRequest(http.MethodPost, account.BaseURL+"/chat/completions", bytes.NewReader(payload))
+		requestContext, cancelRequest := context.WithCancel(ctx)
+		request, errReq := http.NewRequestWithContext(requestContext, http.MethodPost, account.BaseURL+"/chat/completions", bytes.NewReader(payload))
 		if errReq != nil {
+			cancelRequest()
 			res.Classification = "error"
 			res.Error = "无法创建探测请求"
+			m.recordQualityProbeUnavailable(profileID, res.Error)
 			return res, errReq
 		}
 		request.Header.Set("Authorization", "Bearer "+account.AccessToken)
@@ -1224,40 +1446,60 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 		start := time.Now()
 		response, errDo := client.Do(request)
 		if errDo != nil {
+			cancelRequest()
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
 			lastErr = "probe request failed: " + truncateString(errDo.Error(), 120)
 			res.DurationMs = time.Since(start).Milliseconds()
 			if isProbeUnstableErr(errDo) {
+				// 连接建立后迟迟没有响应也可能是单个账号的上游调度异常。
+				// 使用另一个健康账号在同一 WARP 上复核一次，再归因到出口。
+				if !noOutputRetryUsed && accountIndex+1 < len(accounts) {
+					noOutputRetryUsed = true
+					continue
+				}
 				res.Classification = "degraded"
 				res.ErrorKind = "probe_unstable"
 				res.Error = "出口探测超时或链路不稳定: " + truncateString(errDo.Error(), 120)
 				m.markQualityUnstable(profileID, res.Error)
 				return res, nil
 			}
+			lastErrorCounts = true
 			continue
 		}
 		if response.StatusCode >= 400 {
 			body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 			_ = response.Body.Close()
+			cancelRequest()
 			bodyText := string(body)
 			lastErr = fmt.Sprintf("probe upstream HTTP %d: %s", response.StatusCode, truncateString(bodyText, 160))
 			res.DurationMs = time.Since(start).Milliseconds()
 			// 账号、免费额度与限流属于当前探针账号；只有仍有候选时才换号，
 			// 不把这些错误累计成出口降智。
-			if shouldRetryProbeAccount(accountIndex+1 < len(accounts), response.StatusCode, bodyText) {
+			accountError := isProbeAccountError(response.StatusCode, bodyText)
+			if accountError && accountIndex+1 < len(accounts) {
 				m.invalidateXAIProbeAccounts()
 				continue
 			}
 			res.Classification = "error"
 			res.Error = lastErr
-			m.recordQualityProbeError(profileID, res.Error)
+			if accountError {
+				m.recordQualityProbeUnavailable(profileID, res.Error)
+			} else {
+				m.recordQualityProbeError(profileID, res.Error)
+			}
 			return res, nil
 		}
 
 		var (
-			firstTokenAt time.Time
-			contentLen   int
-			usageOut     int64
-			hasThinking  bool
+			firstTokenAt  time.Time
+			contentLen    int
+			usageOut      int64
+			hasThinking   bool
+			streamEnded   bool
+			usageObserved bool
+			finishTimer   *time.Timer
 		)
 		scanner := bufio.NewScanner(response.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -1278,16 +1520,24 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 				continue
 			}
 			if usage, ok := chunk["usage"].(map[string]any); ok {
+				usageObserved = true
 				if v := usageTokens(usage); v > usageOut {
 					usageOut = v
 				}
-				if anyInt64(usage["reasoning_tokens"]) > 0 || anyInt64(usage["reasoningTokens"]) > 0 {
+				if mapHasReasoningTokens(usage) {
 					hasThinking = true
 				}
 			}
 			if choices, ok := chunk["choices"].([]any); ok {
 				for _, c := range choices {
 					choice, _ := c.(map[string]any)
+					// xAI 有时以 finish_reason 结束语义响应但保持 SSE 连接，
+					// 探针必须在消费完最终帧后结算，不能等待缺失的 [DONE]。
+					for _, key := range []string{"finish_reason", "native_finish_reason"} {
+						if reason, _ := choice[key].(string); strings.TrimSpace(reason) != "" {
+							streamEnded = true
+						}
+					}
 					delta, _ := choice["delta"].(map[string]any)
 					if delta == nil {
 						delta, _ = choice["message"].(map[string]any)
@@ -1315,18 +1565,44 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 					}
 				}
 			}
+			if streamEnded && usageObserved {
+				break
+			}
+			if streamEnded && finishTimer == nil {
+				// 部分兼容端点在 finish_reason 后既不发 usage 也不发 [DONE]。
+				// 给最终 usage 帧一个很短的到达窗口，随后取消读取并按已收内容结算。
+				finishTimer = time.AfterFunc(250*time.Millisecond, cancelRequest)
+			}
 		}
+		if finishTimer != nil {
+			finishTimer.Stop()
+		}
+		if err := ctx.Err(); err != nil {
+			_ = response.Body.Close()
+			cancelRequest()
+			return res, err
+		}
+		semanticFinishCanceled := streamEnded && !usageObserved && requestContext.Err() != nil
 		_ = response.Body.Close()
-		if scanErr := scanner.Err(); scanErr != nil {
+		cancelRequest()
+		if scanErr := scanner.Err(); scanErr != nil && !semanticFinishCanceled {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
 			lastErr = "probe stream failed: " + truncateString(scanErr.Error(), 120)
 			res.DurationMs = time.Since(start).Milliseconds()
 			if isProbeUnstableErr(scanErr) {
+				if !noOutputRetryUsed && firstTokenAt.IsZero() && contentLen == 0 && accountIndex+1 < len(accounts) {
+					noOutputRetryUsed = true
+					continue
+				}
 				res.Classification = "degraded"
 				res.ErrorKind = "probe_unstable"
 				res.Error = "出口探测流中断: " + truncateString(scanErr.Error(), 120)
 				m.markQualityUnstable(profileID, res.Error)
 				return res, nil
 			}
+			lastErrorCounts = true
 			continue
 		}
 		duration := time.Since(start)
@@ -1347,6 +1623,7 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 		res.Classification = classifyQualitySignal(res.TPS, outTokens, hasThinking, q)
 		if res.Classification == "unknown" {
 			lastErr = "探测无输出"
+			lastErrorCounts = true
 			continue
 		}
 		if res.Classification == "ignored" {
@@ -1354,6 +1631,9 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 		}
 		if res.Classification == "degraded" && q.ThinkingGuard && !hasThinking {
 			res.Error = "响应缺少 thinking_content（降智）"
+		}
+		if err := ctx.Err(); err != nil {
+			return res, err
 		}
 		_ = m.applyQualitySignal(profileID, res.TPS, outTokens, hasThinking, res.Classification, "probe")
 		return res, nil
@@ -1363,11 +1643,45 @@ func (m *Manager) ProbeProfile(profileID string) (probeQualityResult, error) {
 		lastErr = "所有 xAI 账号探测失败"
 	}
 	res.Error = lastErr
-	m.recordQualityProbeError(profileID, res.Error)
+	if lastErrorCounts {
+		m.recordQualityProbeError(profileID, res.Error)
+	} else {
+		m.recordQualityProbeUnavailable(profileID, res.Error)
+	}
 	return res, nil
 }
 
 func (m *Manager) recordQualityProbeError(profileID, message string) {
+	store := m.stateStore()
+	profile := store.Profile(profileID)
+	if profile == nil {
+		return
+	}
+	profile.QualityTPS = 0
+	profile.QualityClassification = "error"
+	profile.QualitySource = "probe"
+	profile.QualityError = truncateString(message, 240)
+	profile.QualityCheckedAt = time.Now()
+	profile.QualityErrorStrikes++
+	threshold := store.Quality().ConsecutiveErrors
+	if threshold <= 0 {
+		threshold = 3
+	}
+	if !profile.Degraded && profile.QualityErrorStrikes >= threshold {
+		reason := fmt.Sprintf("连续 %d 次出口质量探测失败（%s）", profile.QualityErrorStrikes, truncateString(message, 160))
+		if m.isolateQualityProfile(profile, reason, store.Quality()) {
+			_ = store.UpdateProfile(profile)
+			m.evaluateDegradedFailover(profile)
+			return
+		}
+	}
+	_ = store.UpdateProfileQuiet(profile)
+	m.scheduleQualitySave()
+}
+
+// recordQualityProbeUnavailable 记录账号、额度或探针请求配置问题，供面板排障；
+// 这些失败没有证明 WARP 出口异常，因此不会增加出口错误次数或触发隔离。
+func (m *Manager) recordQualityProbeUnavailable(profileID, message string) {
 	store := m.stateStore()
 	profile := store.Profile(profileID)
 	if profile == nil {
@@ -1390,15 +1704,17 @@ func (m *Manager) markQualityUnstable(profileID, message string) {
 	if profile == nil {
 		return
 	}
-	profile.Degraded = true
-	profile.DegradedAt = time.Now()
-	profile.DegradedReason = truncateString(message, 240)
 	profile.QualityClassification = "degraded"
 	profile.QualitySource = "probe"
 	profile.QualityError = truncateString(message, 240)
 	profile.QualityCheckedAt = time.Now()
-	_ = store.UpdateProfile(profile)
-	m.evaluateDegradedFailover(profile)
+	if m.isolateQualityProfile(profile, truncateString(message, 240), store.Quality()) {
+		_ = store.UpdateProfile(profile)
+		m.evaluateDegradedFailover(profile)
+		return
+	}
+	_ = store.UpdateProfileQuiet(profile)
+	m.scheduleQualitySave()
 }
 
 func qualityProbeInterval(q QualityConfig) time.Duration {

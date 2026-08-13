@@ -145,6 +145,11 @@ func handlePluginMethod(method string, request []byte) ([]byte, error) {
 			return nil, err
 		}
 		return okEnvelope(map[string]any{})
+	case "request.intercept_after":
+		// CPA 会为 request_interceptor 能力成对调用 before/after。xAI 质量
+		// 由 usage 与流式响应回调结算，after 只需确认生命周期已接收，避免
+		// 宿主把正常请求记录成插件拦截器失败。
+		return okEnvelope(map[string]any{})
 	case "response.intercept_stream_chunk":
 		var record map[string]any
 		if len(request) > 0 {

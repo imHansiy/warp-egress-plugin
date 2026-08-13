@@ -173,6 +173,9 @@ type Profile struct {
 	DegradedAt     time.Time `json:"degraded_at,omitempty"`
 	QualityTPS     float64   `json:"quality_tps,omitempty"`
 	QualityStrikes int       `json:"quality_strikes,omitempty"`
+	// QualityErrorStrikes 只累计能够归因到出口或探测链路的失败；账号过期、
+	// 额度耗尽和暂无可调度账号只展示错误，不消耗这个计数。
+	QualityErrorStrikes int `json:"quality_error_strikes,omitempty"`
 	// QualityThinkingStrikes 单独累计“有足够输出但缺少 thinking”样本，
 	// 避免与 TPS 异常计数混在一起后由不同质量信号误触发隔离。
 	QualityThinkingStrikes int       `json:"quality_thinking_strikes,omitempty"`
@@ -233,7 +236,9 @@ const (
 	XAIRouteModeIndependent  = "independent"
 	XAIRouteModeFollowGlobal = "follow_global"
 	XAIRouteModeDirect       = "direct"
-	qualityPolicySchema      = 2
+	qualityThinkingSchema    = 2
+	qualityProbeModelSchema  = 3
+	qualityPolicySchema      = 4
 )
 
 // XAIRouteConfig 只决定 xAI 请求通过插件本地中继后的出口。
@@ -255,7 +260,9 @@ type QualityConfig struct {
 	// false 时域名路由、主动探测、自动补充/清理和独立切换均不接管核心行为。
 	Enabled                    bool               `json:"enabled"`
 	SoftTPS                    float64            `json:"soft_tps"`
+	HardTPS                    float64            `json:"hard_tps"`
 	ConsecutiveDegraded        int                `json:"consecutive_degraded"`
+	ConsecutiveErrors          int                `json:"consecutive_errors"`
 	ThinkingGuard              bool               `json:"thinking_guard"`
 	ConsecutiveMissingThinking int                `json:"consecutive_missing_thinking"`
 	ThinkingCrossVerify        bool               `json:"thinking_cross_verify"`
@@ -279,7 +286,9 @@ func defaultQualityConfig() QualityConfig {
 		// 主动探测和独立出口切换行为。
 		Enabled:                    false,
 		SoftTPS:                    500,
+		HardTPS:                    1000,
 		ConsecutiveDegraded:        3,
+		ConsecutiveErrors:          3,
 		ThinkingGuard:              true,
 		ConsecutiveMissingThinking: 1,
 		ThinkingCrossVerify:        true,
@@ -294,7 +303,7 @@ func defaultQualityConfig() QualityConfig {
 		ProvisionCooldownMin:       15,
 		Probe: QualityProbeConfig{
 			Enabled:         true,
-			Model:           "grok-4",
+			Model:           "grok-4.6",
 			MaxTokens:       128,
 			TimeoutSeconds:  60,
 			IntervalMinutes: 15,

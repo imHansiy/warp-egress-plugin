@@ -46,8 +46,7 @@ func (s *StateStore) Load() error {
 		if p == nil {
 			continue
 		}
-		p.Running = false
-		p.PID = 0
+		normalizeReloadedProfile(p)
 	}
 	s.state = state
 	return nil
@@ -70,13 +69,27 @@ func (s *StateStore) ReplaceState(state PersistedState) error {
 		if p == nil {
 			continue
 		}
-		p.Running = false
-		p.PID = 0
+		normalizeReloadedProfile(p)
 	}
 	s.mu.Lock()
 	s.state = state
 	s.mu.Unlock()
 	return s.Save()
+}
+
+func normalizeReloadedProfile(profile *Profile) {
+	profile.Running = false
+	profile.PID = 0
+	if profile.QualityClassification != "verifying" {
+		return
+	}
+	// 主动交叉验证任务只存在于当前进程内，插件重载后无法继续等待原任务；
+	// 保留出口并清除临时 strike，让下一次真实请求重新形成完整质量结论。
+	profile.QualityClassification = "error"
+	profile.QualitySource = "probe"
+	profile.QualityError = "插件重载中断上次主动交叉验证，保留当前出口"
+	profile.QualityStrikes = 0
+	profile.QualityThinkingStrikes = 0
 }
 
 func cloneState(src PersistedState) PersistedState {
@@ -309,19 +322,49 @@ func normalizeQualityConfig(config QualityConfig) QualityConfig {
 		return defaults
 	}
 	// schema 2 把参考实现中新加入的 thinking 双重确认默认值一次性迁移进来；
-	// 后续用户显式关闭开关时 schema 已是最新，不会被再次强制打开。
-	if config.PolicySchema < qualityPolicySchema {
+	// 后续用户显式关闭开关时不再强制打开。
+	if config.PolicySchema < qualityThinkingSchema {
 		config.ThinkingGuard = defaults.ThinkingGuard
 		config.ThinkingCrossVerify = defaults.ThinkingCrossVerify
 		config.SoftCrossVerify = defaults.SoftCrossVerify
+		config.PolicySchema = qualityThinkingSchema
+	}
+	// schema 3 淘汰已经不在 CPA 模型列表中的旧默认探针模型。只迁移
+	// schema-2 的默认值，避免覆盖新版本中用户主动填写的模型。
+	if config.PolicySchema < qualityProbeModelSchema {
+		if strings.TrimSpace(config.Probe.Model) == "" || strings.EqualFold(strings.TrimSpace(config.Probe.Model), "grok-4") {
+			config.Probe.Model = defaults.Probe.Model
+		}
+		config.PolicySchema = qualityProbeModelSchema
+	}
+	// schema 4 补齐硬阈值。已有策略只新增缺失字段，不改变用户已经设置的
+	// 软阈值与连续次数；硬阈值命中后会直接退出活动出口池。
+	if config.PolicySchema < qualityPolicySchema {
+		if config.HardTPS <= 0 {
+			config.HardTPS = defaults.HardTPS
+		}
+		if config.ConsecutiveErrors <= 0 {
+			config.ConsecutiveErrors = defaults.ConsecutiveErrors
+		}
 		config.PolicySchema = qualityPolicySchema
 	}
 	// 只回填显式为零的字段（避免 UI 少传字段时把默认值清掉）。
 	if config.SoftTPS <= 0 {
 		config.SoftTPS = defaults.SoftTPS
 	}
+	if config.HardTPS <= 0 {
+		config.HardTPS = defaults.HardTPS
+	}
+	// 硬阈值是软阈值之上的立即隔离区间；填反时收敛到软阈值，
+	// 避免本应累计复测的样本被更低的硬阈值抢先隔离。
+	if config.HardTPS < config.SoftTPS {
+		config.HardTPS = config.SoftTPS
+	}
 	if config.ConsecutiveDegraded <= 0 {
 		config.ConsecutiveDegraded = defaults.ConsecutiveDegraded
+	}
+	if config.ConsecutiveErrors <= 0 {
+		config.ConsecutiveErrors = defaults.ConsecutiveErrors
 	}
 	if config.ConsecutiveMissingThinking <= 0 {
 		config.ConsecutiveMissingThinking = defaults.ConsecutiveMissingThinking
