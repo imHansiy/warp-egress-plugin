@@ -23,37 +23,37 @@
           {
             "goos": "linux",
             "goarch": "amd64",
-            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.7.0/warp-egress_0.7.0_linux_amd64.zip",
-            "sha256": "273e916854488c46d8120e9ed0cc83927da94bda69068636140523cff1cf4ec7",
-            "size": 11950273
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.8.1/warp-egress_0.8.1_linux_amd64.zip",
+            "sha256": "0c9e4aff184e69959dbcbb5cb11397c793d498184cf189ea1009ed6cbf9369bb",
+            "size": 11957820
           },
           {
             "goos": "linux",
             "goarch": "arm64",
-            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.7.0/warp-egress_0.7.0_linux_arm64.zip",
-            "sha256": "b7230de91208c00bdfbc81d989d77be7b8553d9300a12b0c916bc92286f7254f",
-            "size": 10817418
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.8.1/warp-egress_0.8.1_linux_arm64.zip",
+            "sha256": "17c0d1d2f2eddf8e7bd0561ea7e64270dcfbf6b7655e653e31d651a4cc4c0b18",
+            "size": 10826952
           },
           {
             "goos": "windows",
             "goarch": "amd64",
-            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.7.0/warp-egress_0.7.0_windows_amd64.zip",
-            "sha256": "5efcbd7c3df72ac35475bab4d9ad566409758a3e045668f069057bf606511cf0",
-            "size": 12088091
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.8.1/warp-egress_0.8.1_windows_amd64.zip",
+            "sha256": "626ea2b920d24ef011a35291985791b57acb29fe2a266415e47a563db510ca04",
+            "size": 12097942
           },
           {
             "goos": "darwin",
             "goarch": "amd64",
-            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.7.0/warp-egress_0.7.0_darwin_amd64.zip",
-            "sha256": "c83d4135c60cdf70b452fbda3d58e7be53b4a83327ea59cf046412b34028c778",
-            "size": 11900996
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.8.1/warp-egress_0.8.1_darwin_amd64.zip",
+            "sha256": "82a9d8ee05041c10d256d8c572fa7e150a00eead6eb5b80b1c1c54940e7a1e5f",
+            "size": 11908965
           },
           {
             "goos": "darwin",
             "goarch": "arm64",
-            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.7.0/warp-egress_0.7.0_darwin_arm64.zip",
-            "sha256": "7f07df432520c1cc19440b1f811f697449ad34a91945354da748e1b9554d58eb",
-            "size": 11167481
+            "url": "https://gh-proxy.org/https://github.com/imHansiy/warp-egress-plugin/releases/download/v0.8.1/warp-egress_0.8.1_darwin_arm64.zip",
+            "sha256": "d3ccf5fb70f451b9359d7fc451c8eea850f02bb1edebfaa0cdb3c015917778ab",
+            "size": 11173416
           }
         ]
       }
