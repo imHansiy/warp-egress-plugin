@@ -1297,6 +1297,9 @@ func TestProbeProfileRetriesNoOutputAccountAndStopsAtFinishReason(t *testing.T) 
 		}
 		observedRequest <- request
 		w.Header().Set("Content-Type", "text/event-stream")
+		// 为健康账号保留一个可计量的生成窗口，避免内存 HTTP 服务在同一毫秒
+		// 返回时 DurationMs 截断为 0，反而把完整 usage 误当成“探测无输出”。
+		time.Sleep(5 * time.Millisecond)
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"probe output with enough text for a quality observation\"},\"finish_reason\":\"stop\"}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"completion_tokens\":64,\"completion_tokens_details\":{\"reasoning_tokens\":12}}}\n\n"))
 		if flusher, ok := w.(http.Flusher); ok {
